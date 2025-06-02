@@ -7,6 +7,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FiLogOut, FiSearch, FiMoreVertical, FiSmile, FiPaperclip, FiChevronDown } from 'react-icons/fi';
 import data from '@emoji-mart/data';
 import Picker from '@emoji-mart/react';
+import { IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from "@mui/material";
+import { Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from "@mui/material";
+import { TextField } from "@mui/material";
+import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { useAuth } from "../contexts/AuthContext";
+import RoomList from "./RoomList";
 
 /**
  * ChatRoom – an opinionated, responsive UI for a Web‑Socket chat room.
@@ -20,17 +26,20 @@ import Picker from '@emoji-mart/react';
  * concerns to the parent.
  */
 export default function ChatRoomUI({ socket, username, onLogout }) {
+  const { user, logout } = useAuth();
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [typingUser, setTypingUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [userStatuses, setUserStatuses] = useState(new Map());
   const [filteredUsers, setFilteredUsers] = useState([]);
   const scrollRef = useRef(null);
   const searchTimeoutRef = useRef(null);
+  const [userMenuAnchorEl, setUserMenuAnchorEl] = useState(null);
+  const [showDeleteProfileDialog, setShowDeleteProfileDialog] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState(null);
 
   useEffect(() => {
     // Filter users based on search query and exclude current user
@@ -44,12 +53,14 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
     if (!socket) return;
 
     socket.on('message', (msg) => {
-      setMessages((prev) => [...prev, {
-        id: Date.now(),
-        author: msg.user,
-        text: msg.text,
-        ts: msg.timestamp
-      }]);
+      if (msg.roomId === selectedRoom?.id) {
+        setMessages((prev) => [...prev, {
+          id: Date.now(),
+          author: msg.user,
+          text: msg.text,
+          ts: msg.timestamp
+        }]);
+      }
       // Reset user's inactivity timer when they send a message
       updateUserStatus(msg.user, 'online');
     });
@@ -73,12 +84,21 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
       users.forEach(user => updateUserStatus(user, 'online'));
     });
 
-    socket.on('userTyping', ({ user, isTyping }) => {
-      if (user !== username) {
+    socket.on('userTyping', ({ user, isTyping, roomId }) => {
+      if (user !== username && roomId === selectedRoom?.id) {
         setTypingUser(user);
         updateUserStatus(user, 'online');
         setTimeout(() => setTypingUser(null), 2000);
       }
+    });
+
+    socket.on('joinRoom', ({ roomId, messages: roomMessages }) => {
+      setMessages(roomMessages.map(msg => ({
+        id: msg.id || Date.now(),
+        author: msg.user,
+        text: msg.text,
+        ts: msg.timestamp
+      })));
     });
 
     return () => {
@@ -87,8 +107,9 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
       socket.off('userLeft');
       socket.off('userList');
       socket.off('userTyping');
+      socket.off('joinRoom');
     };
-  }, [socket, username]);
+  }, [socket, username, selectedRoom]);
 
   const updateUserStatus = (user, status) => {
     setUserStatuses(prev => {
@@ -119,8 +140,8 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
   }, [messages]);
 
   const sendMessage = () => {
-    if (!draft.trim()) return;
-    socket.emit('message', { text: draft });
+    if (!draft.trim() || !selectedRoom) return;
+    socket.emit('message', { text: draft, roomId: selectedRoom.id });
     setDraft("");
     updateUserStatus(username, 'online');
   };
@@ -129,10 +150,18 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
-    } else {
-      socket.emit('typing', true);
+    } else if (selectedRoom) {
+      socket.emit('typing', { isTyping: true, roomId: selectedRoom.id });
       updateUserStatus(username, 'online');
     }
+  };
+
+  const handleRoomSelect = (room) => {
+    if (room) {
+      socket.emit('joinRoom', { roomId: room.id });
+    }
+    setSelectedRoom(room);
+    setMessages([]);
   };
 
   const getStatusColor = (user) => {
@@ -152,195 +181,219 @@ export default function ChatRoomUI({ socket, username, onLogout }) {
     setShowEmojiPicker(false);
   };
 
+  const handleUserMenuClick = (event) => {
+    setUserMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleUserMenuClose = () => {
+    setUserMenuAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    if (socket) {
+      socket.emit('user_logout');
+    }
+    logout();
+  };
+
+  const handleDeleteProfile = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/delete', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete profile');
+      }
+
+      if (socket) {
+        socket.emit('user_logout');
+      }
+      logout();
+    } catch (error) {
+      console.error('Error deleting profile:', error);
+      alert('Failed to delete profile. Please try again.');
+    }
+    setShowDeleteProfileDialog(false);
+    setUserMenuAnchorEl(null);
+  };
+
   return (
-    <div className="h-screen flex">
-      {/* Left Sidebar */}
-      <div className="w-64 border-r flex flex-col bg-[#111827] text-white">
-        {/* App Title and Search */}
-        <div className="p-4 border-b border-gray-700">
-          <h1 className="text-xl font-bold mb-4">JustChat</h1>
-          <div className="relative">
-            <Input
-              type="text"
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 bg-gray-800 border-gray-700 text-white placeholder:text-gray-400"
-            />
-            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+    <div className="flex h-full">
+      {/* Sidebar */}
+      <div className="w-80 border-r flex flex-col">
+        {/* User Profile */}
+        <div className="p-4 border-b flex justify-between items-center">
+          <div className="flex items-center space-x-3">
+            <Avatar>
+              <AvatarFallback>{user?.username?.[0].toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <span className="font-medium">{user?.username}</span>
           </div>
+          <IconButton onClick={(e) => setUserMenuAnchorEl(e.currentTarget)}>
+            <FiMoreVertical />
+          </IconButton>
         </div>
 
-        {/* Users List (excluding current user) */}
-        <div className="flex-1 overflow-auto">
+        {/* Room List */}
+        <div className="flex-1 overflow-hidden">
+          <RoomList
+            socket={socket}
+            onRoomSelect={handleRoomSelect}
+            selectedRoom={selectedRoom}
+          />
+        </div>
+
+        {/* Online Users */}
+        <div className="border-t">
           <div className="p-4">
-            <div className="space-y-2">
-              {filteredUsers.map((name) => (
-                <div
-                  key={name}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800"
-                >
-                  <div className="relative">
-                    <Avatar>
-                      <AvatarFallback className="bg-gray-700 text-white">
-                        {name.slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#111827] ${getStatusColor(name)}`} />
-                  </div>
-                  <span className="flex-1 truncate">{name}</span>
+            <div className="flex items-center space-x-2 mb-4">
+              <FiSearch className="text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1"
+              />
+            </div>
+            <div className="font-medium text-sm text-gray-500 mb-2">
+              Online Users ({filteredUsers.length})
+            </div>
+            <ScrollArea className="h-48">
+              {filteredUsers.map(user => (
+                <div key={user} className="flex items-center space-x-3 py-2">
+                  <div className={`w-2 h-2 rounded-full ${getStatusColor(user)}`} />
+                  <span>{user}</span>
                 </div>
               ))}
-            </div>
+            </ScrollArea>
           </div>
         </div>
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col bg-gray-50">
-        {/* Chat Header */}
-        <div className="px-6 py-4 border-b bg-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Avatar>
-              <AvatarFallback>GC</AvatarFallback>
-            </Avatar>
-            <div>
-              <h2 className="font-semibold">Group Chat</h2>
-              <p className="text-sm text-gray-500">{onlineUsers.length} participants</p>
-            </div>
-          </div>
-          <div className="relative">
-            <div className="relative">
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
-              >
-                <div className="relative">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-[#A855F7] text-white">
-                      {username.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${getStatusColor(username)}`} />
-                </div>
-                <FiChevronDown />
-              </Button>
+      <div className="flex-1 flex flex-col">
+        {selectedRoom ? (
+          <>
+            {/* Chat Header */}
+            <div className="p-4 border-b">
+              <h2 className="text-lg font-semibold">{selectedRoom.name}</h2>
+              <div className="text-sm text-gray-500">
+                {selectedRoom.participants?.length || 0} participants
+              </div>
             </div>
 
-            <AnimatePresence>
-              {showUserMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5"
-                >
-                  <div className="py-1">
-                    <button
-                      onClick={onLogout}
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+            {/* Messages */}
+            <ScrollArea ref={scrollRef} className="flex-1 p-4">
+              <div className="space-y-4">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${
+                      msg.author === user?.username ? "justify-end" : "justify-start"
+                    }`}
+                  >
+                    <div
+                      className={`rounded-lg px-4 py-2 max-w-[70%] ${
+                        msg.author === user?.username
+                          ? "bg-[#A855F7] text-white"
+                          : "bg-gray-100"
+                      }`}
                     >
-                      <FiLogOut className="h-4 w-4" />
-                      Sign out
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <ScrollArea ref={scrollRef} className="flex-1 p-6">
-          <div className="space-y-4">
-            {messages.map(({ id, author, text, ts }) => {
-              const isSelf = author === username;
-              return (
-                <motion.div
-                  key={id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${isSelf ? "justify-end" : "justify-start"}`}
-                >
-                  <div className={`flex items-start gap-3 max-w-[70%] ${isSelf ? "flex-row-reverse" : ""}`}>
-                    {!isSelf && (
-                      <Avatar className="mt-1">
-                        <AvatarFallback>
-                          {author.slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    <div className={`rounded-2xl p-3 ${isSelf ? "bg-[#A855F7] text-white" : "bg-white"}`}>
-                      {!isSelf && <p className="font-medium text-sm mb-1">{author}</p>}
-                      <p className="text-sm">{text}</p>
-                      <p className="text-[10px] mt-1 opacity-70 text-right">
-                        {new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
+                      {msg.author !== user?.username && (
+                        <div className="text-sm font-medium mb-1">{msg.author}</div>
+                      )}
+                      <div>{msg.text}</div>
                     </div>
                   </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </ScrollArea>
+                ))}
+              </div>
+              {typingUser && (
+                <div className="text-sm text-gray-500 mt-2">
+                  {typingUser} is typing...
+                </div>
+              )}
+            </ScrollArea>
 
-        {/* Typing Indicator */}
-        {typingUser && (
-          <div className="px-6 py-2">
-            <p className="text-sm text-gray-500">{typingUser} is typing...</p>
-          </div>
-        )}
-
-        {/* Message Input */}
-        <div className="p-4 bg-white border-t">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage();
-            }}
-            className="flex items-center gap-2"
-          >
-            <Button type="button" variant="ghost" size="icon">
-              <FiPaperclip />
-            </Button>
-            <Input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder="Type your message..."
-              className="flex-1"
-            />
-            <div className="relative">
-              <Button 
-                type="button" 
-                variant="ghost" 
-                size="icon"
-                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              >
-                <FiSmile />
-              </Button>
-              {showEmojiPicker && (
-                <div className="absolute bottom-full right-0 mb-2">
-                  <Picker 
-                    data={data} 
-                    onEmojiSelect={onEmojiSelect}
-                    theme="light"
+            {/* Message Input */}
+            <div className="p-4 border-t">
+              <div className="flex items-center space-x-2">
+                <div className="relative flex-1">
+                  <Input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={handleKey}
+                    placeholder="Type a message..."
+                    className="pr-24"
                   />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                    <IconButton onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+                      <FiSmile />
+                    </IconButton>
+                    <IconButton>
+                      <FiPaperclip />
+                    </IconButton>
+                  </div>
+                </div>
+                <Button onClick={sendMessage}>Send</Button>
+              </div>
+              {showEmojiPicker && (
+                <div className="absolute bottom-20 right-4">
+                  <Picker data={data} onEmojiSelect={onEmojiSelect} />
                 </div>
               )}
             </div>
-            <Button 
-              type="submit" 
-              disabled={!draft.trim()}
-              className="bg-[#A855F7] text-white hover:bg-[#9333EA]"
-            >
-              Send
-            </Button>
-          </form>
-        </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-gray-500">
+            Select a room to start chatting
+          </div>
+        )}
       </div>
+
+      {/* User Menu */}
+      <Menu
+        anchorEl={userMenuAnchorEl}
+        open={Boolean(userMenuAnchorEl)}
+        onClose={handleUserMenuClose}
+      >
+        <MenuItem onClick={handleLogout}>
+          <ListItemIcon>
+            <FiLogOut />
+          </ListItemIcon>
+          <ListItemText>Sign Out</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => {
+          setShowDeleteProfileDialog(true);
+          setUserMenuAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <DeleteIcon />
+          </ListItemIcon>
+          <ListItemText>Delete Profile</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Delete Profile Dialog */}
+      <Dialog open={showDeleteProfileDialog} onClose={() => setShowDeleteProfileDialog(false)}>
+        <DialogTitle>Delete Profile</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete your profile? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteProfileDialog(false)}>Cancel</Button>
+          <Button onClick={handleDeleteProfile} color="error">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 } 
