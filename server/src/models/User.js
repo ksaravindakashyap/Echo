@@ -47,6 +47,28 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
+// Static method to delete user and cleanup associated data
+userSchema.statics.deleteUser = async function(userId) {
+  const user = await this.findById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Delete user's rooms
+  const ChatRoom = require('./ChatRoom');
+  await ChatRoom.deleteMany({ createdBy: userId });
+
+  // Remove user from all rooms they're a member of
+  await ChatRoom.updateMany(
+    { members: userId },
+    { $pull: { members: userId } }
+  );
+
+  // Finally delete the user
+  await user.delete();
+  return true;
+};
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User; 
