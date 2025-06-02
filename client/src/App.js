@@ -1,52 +1,129 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import ChatRoom from './components/ChatRoomUI';
+import ChatRoomUI from './components/ChatRoomUI';
+import Login from './components/Login';
 import './index.css';
 
 const SOCKET_SERVER_URL = process.env.REACT_APP_SERVER_URL || 'http://localhost:5000';
 
 function App() {
   const [socket, setSocket] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState('');
-  const [isJoined, setIsJoined] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleJoin = (e) => {
-    e.preventDefault();
-    if (!username.trim()) return;
-    
-    const newSocket = io(SOCKET_SERVER_URL);
-    setSocket(newSocket);
-    newSocket.emit('join', username);
-    setIsJoined(true);
+  // Check for existing auth on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const userData = JSON.parse(localStorage.getItem('userData'));
+        if (userData && userData.token) {
+          // Create socket connection with stored credentials
+          const newSocket = io(SOCKET_SERVER_URL, {
+            auth: {
+              token: userData.token
+            },
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+          });
+
+          // Handle successful connection
+          newSocket.on('connect', () => {
+            setSocket(newSocket);
+            setUsername(userData.username);
+            setIsAuthenticated(true);
+            newSocket.emit('join', { username: userData.username });
+          });
+
+          // Handle connection errors
+          newSocket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            if (error.message === 'Authentication error') {
+              localStorage.removeItem('userData');
+              setIsAuthenticated(false);
+              setUsername('');
+              setSocket(null);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error checking authentication:', error);
+        localStorage.removeItem('userData');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const handleLogin = (userData) => {
+    // Save auth data to localStorage
+    localStorage.setItem('userData', JSON.stringify({
+      token: userData.token,
+      username: userData.username,
+      userId: userData.userId
+    }));
+
+    // Create socket connection with auth token
+    const newSocket = io(SOCKET_SERVER_URL, {
+      auth: {
+        token: userData.token
+      },
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+
+    newSocket.on('connect', () => {
+      setSocket(newSocket);
+      setUsername(userData.username);
+      setIsAuthenticated(true);
+      newSocket.emit('join', { username: userData.username });
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      if (error.message === 'Authentication error') {
+        localStorage.removeItem('userData');
+        setIsAuthenticated(false);
+        setUsername('');
+        setSocket(null);
+      }
+    });
   };
 
+  const handleLogout = () => {
+    if (socket) {
+      socket.disconnect();
+      setSocket(null);
+    }
+    localStorage.removeItem('userData');
+    setIsAuthenticated(false);
+    setUsername('');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#A855F7]"></div>
+      </div>
+    );
+  }
+
   return (
-    <>
-      {!isJoined ? (
-        <div className="h-screen w-full flex items-center justify-center bg-gray-50">
-          <div className="w-full max-w-md p-8 space-y-4 bg-white rounded-lg shadow-lg">
-            <h1 className="text-2xl font-bold text-center">Join Chat</h1>
-            <form onSubmit={handleJoin} className="space-y-4">
-              <input
-                type="text"
-                placeholder="Enter your username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                type="submit"
-                className="w-full px-4 py-2 text-white bg-blue-500 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                Join
-              </button>
-            </form>
-          </div>
-        </div>
+    <div className="h-screen">
+      {!isAuthenticated ? (
+        <Login onLogin={handleLogin} />
       ) : (
-        <ChatRoom socket={socket} username={username} />
+        <ChatRoomUI 
+          socket={socket} 
+          username={username} 
+          onLogout={handleLogout}
+        />
       )}
-    </>
+    </div>
   );
 }
 
