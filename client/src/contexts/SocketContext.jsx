@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import io from 'socket.io-client';
 
+const SOCKET_SERVER_URL = 'http://localhost:5000';
+
 const SocketContext = createContext();
 
 export const useSocket = () => {
@@ -12,7 +14,7 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     console.log('Initializing socket connection...');
-    const newSocket = io('/', {
+    const newSocket = io(SOCKET_SERVER_URL, {
       path: '/socket.io',
       autoConnect: true,
       reconnection: true,

@@ -63,11 +63,28 @@ module.exports = (io) => {
         const room = await ChatRoom.create({
           name: data.name,
           createdBy: userId,
-          isPrivate: data.isPrivate
+          isPrivate: data.isPrivate,
+          maxParticipants: data.maxParticipants || 50
         });
+        
+        // Join the room automatically after creation
         socket.join(`room_${room.id}`);
-        io.emit('room_created', room);
-        callback({ success: true, room });
+        
+        // If private room, return the access code
+        const responseRoom = {
+          ...room,
+          participants: [userId],
+          accessCode: room.isPrivate ? room.accessCode : null
+        };
+        
+        // Emit to all clients for public rooms, only to creator for private rooms
+        if (!room.isPrivate) {
+          io.emit('room_created', responseRoom);
+        } else {
+          socket.emit('room_created', responseRoom);
+        }
+        
+        callback({ success: true, room: responseRoom });
       } catch (error) {
         console.error('Error creating room:', error);
         callback({ success: false, error: error.message });
@@ -77,13 +94,26 @@ module.exports = (io) => {
     socket.on('join_room', async (data, callback) => {
       try {
         const room = await ChatRoom.join(data.roomId, userId, data.accessCode);
+        
+        // Join the socket room
         socket.join(`room_${room.id}`);
+        
+        // Get online users in the room
+        const roomSockets = await io.in(`room_${room.id}`).allSockets();
+        const onlineUsers = Array.from(roomSockets).map(socketId => {
+          const user = userSockets.get(socketId);
+          return user ? { id: user.id, username: user.username } : null;
+        }).filter(Boolean);
+        
+        // Notify room members
         io.to(`room_${room.id}`).emit('user_joined_room', {
           roomId: room.id,
-          userId,
+          user: { id: userId, username: socket.username },
+          onlineUsers,
           timestamp: new Date()
         });
-        callback({ success: true, room });
+        
+        callback({ success: true, room: { ...room, onlineUsers } });
       } catch (error) {
         callback({ success: false, error: error.message });
       }
