@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 const navLinks = [
   { name: 'About', href: '#about' },
-  { name: 'Contact', href: '#contact' },
+  { name: 'Contact', href: '/contact', isRoute: true },
 ];
 
 export default function Header() {
@@ -19,13 +19,23 @@ export default function Header() {
           {/* Navigation Links */}
           <div className="hidden md:flex items-center">
             {navLinks.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                className="font-medium text-gray-700 hover:text-gray-900 mx-4 transition-colors"
-              >
-                {link.name}
-              </a>
+              link.isRoute ? (
+                <Link
+                  key={link.name}
+                  to={link.href}
+                  className="font-medium text-gray-700 hover:text-gray-900 mx-4 transition-colors"
+                >
+                  {link.name}
+                </Link>
+              ) : (
+                <a
+                  key={link.name}
+                  href={link.href}
+                  className="font-medium text-gray-700 hover:text-gray-900 mx-4 transition-colors"
+                >
+                  {link.name}
+                </a>
+              )
             ))}
           </div>
 
@@ -39,7 +49,7 @@ export default function Header() {
             </Link>
             <Link
               to="/register"
-              className="bg-orange-500 text-white rounded-lg px-5 py-2 shadow-md hover:bg-orange-600 transition-colors font-medium"
+              className="bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white rounded-lg px-5 py-2 shadow-md hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200 font-medium"
             >
               Sign Up
             </Link>

@@ -18,7 +18,7 @@ export default function Hero() {
             <div className="mt-8 flex flex-wrap gap-4">
               <Link
                 to="/register"
-                className="inline-flex items-center bg-orange-500 text-white font-semibold rounded-lg px-6 py-3 shadow-md hover:bg-orange-600 transition-colors"
+                className="inline-flex items-center bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white font-semibold rounded-lg px-6 py-3 shadow-md hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200"
               >
                 ▶️ Get Started
               </Link>

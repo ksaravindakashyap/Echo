@@ -39,6 +39,22 @@ export default function ChatRoomUI() {
   const [showAccessCodeDialog, setShowAccessCodeDialog] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
 
+  // Helper function to normalize room data format
+  const normalizeRoomData = (room) => {
+    if (!room) return null;
+    
+    return {
+      id: room.id,
+      name: room.name,
+      isPrivate: Boolean(room.isPrivate || room.is_private),
+      createdBy: room.createdBy || room.created_by,
+      createdAt: room.createdAt || room.created_at,
+      accessCode: room.accessCode || room.access_code,
+      lastMessage: room.lastMessage,
+      lastMessageTime: room.lastMessageTime
+    };
+  };
+
   // Track user activity
   useEffect(() => {
     if (!socket || !user) return;
@@ -122,7 +138,8 @@ export default function ChatRoomUI() {
 
     socket.on('room_updated', (room) => {
       if (room.id === selectedRoom?.id) {
-        setSelectedRoom(room);
+        const normalizedRoom = normalizeRoomData(room);
+        setSelectedRoom(normalizedRoom);
       }
     });
 
@@ -228,8 +245,8 @@ export default function ChatRoomUI() {
   };
 
   const handleRoomSelect = (room) => {
-    console.log('[ChatUI] Selecting room:', room);
-    setSelectedRoom(room);
+    const normalizedRoom = normalizeRoomData(room);
+    setSelectedRoom(normalizedRoom);
     setMessages([]);
 
     if (!socket) {
@@ -240,19 +257,13 @@ export default function ChatRoomUI() {
     // Join the room and get messages
     socket.emit('join_room', { roomId: room.id }, (response) => {
       if (response.success) {
-        console.log('[ChatUI] Successfully joined room:', response.room);
-        // Get room details including access code if creator
-        socket.emit('get_room_details', { roomId: room.id }, (detailsResponse) => {
-          if (detailsResponse.success) {
-            console.log('[ChatUI] Got room details:', detailsResponse.room);
-            setSelectedRoom(detailsResponse.room);
-          }
-        });
+        // Update the selected room with the response data to ensure consistency
+        const normalizedResponseRoom = normalizeRoomData(response.room);
+        setSelectedRoom(normalizedResponseRoom);
 
         // Get room messages
         socket.emit('get_room_messages', { roomId: room.id }, (messagesResponse) => {
           if (messagesResponse.success) {
-            console.log('[ChatUI] Got room messages:', messagesResponse.messages);
             setMessages(messagesResponse.messages || []);
           } else {
             console.error('[ChatUI] Failed to get messages:', messagesResponse.error);
@@ -273,6 +284,25 @@ export default function ChatRoomUI() {
 
   const handleLogout = () => {
     logout();
+    setUserMenuAnchorEl(null);
+  };
+
+  const handleDeleteProfile = () => {
+    if (window.confirm('Are you sure you want to delete your profile? This action cannot be undone.')) {
+      if (socket) {
+        socket.emit('delete_profile', { userId: user?.id }, (response) => {
+          if (response.success) {
+            logout(); // Log out the user after successful deletion
+          } else {
+            console.error('Failed to delete profile:', response.error);
+            alert('Failed to delete profile: ' + (response.error || 'Unknown error'));
+          }
+        });
+      } else {
+        console.error('Socket not available');
+        alert('Cannot delete profile - connection error');
+      }
+    }
     setUserMenuAnchorEl(null);
   };
 
@@ -311,14 +341,22 @@ export default function ChatRoomUI() {
         setShowRenameDialog(false);
         setNewRoomName('');
         setRoomSettingsAnchorEl(null);
+        // Update the selected room with new data
+        const normalizedRoom = normalizeRoomData(response.room);
+        setSelectedRoom(normalizedRoom);
       } else {
         console.error('Failed to rename room:', response.error);
+        alert('Failed to rename room: ' + response.error);
       }
     });
   };
 
   const handleDeleteRoom = () => {
     if (!socket || !selectedRoom) return;
+
+    if (!window.confirm(`Are you sure you want to delete the room "${selectedRoom.name}"? This action cannot be undone.`)) {
+      return;
+    }
 
     socket.emit('delete_room', {
       roomId: selectedRoom.id
@@ -329,6 +367,7 @@ export default function ChatRoomUI() {
         setRoomSettingsAnchorEl(null);
       } else {
         console.error('Failed to delete room:', response.error);
+        alert('Failed to delete room: ' + response.error);
       }
     });
   };
@@ -350,7 +389,7 @@ export default function ChatRoomUI() {
       {/* Left Sidebar */}
       <div className="w-[280px] flex flex-col bg-white border-r">
         {/* User Profile */}
-        <div className="p-4 flex items-center justify-between border-b bg-gradient-to-r from-orange-500 via-orange-600 to-red-500">
+        <div className="p-4 flex items-center justify-between border-b bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">
@@ -388,7 +427,7 @@ export default function ChatRoomUI() {
                 {selectedRoom.name}
               </h1>
             </div>
-            {selectedRoom.createdBy === user?.id && (
+            {(Number(selectedRoom.createdBy) === Number(user?.id)) && (
               <IconButton 
                 className="text-gray-600 hover:text-gray-900"
                 onClick={(e) => setRoomSettingsAnchorEl(e.currentTarget)}
@@ -420,7 +459,7 @@ export default function ChatRoomUI() {
                       <div
                         className={`rounded-2xl px-4 py-2 ${
                           isOwnMessage
-                            ? 'bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white rounded-tr-none'
+                            ? 'bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white rounded-tr-none'
                             : 'bg-white text-gray-900 rounded-tl-none shadow-sm border border-gray-100'
                         }`}
                       >
@@ -477,7 +516,7 @@ export default function ChatRoomUI() {
                 <button
                   type="submit"
                   disabled={!draft.trim()}
-                  className="p-3 rounded-full bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white hover:from-orange-600 hover:via-orange-700 hover:to-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="p-3 rounded-full bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -549,9 +588,7 @@ export default function ChatRoomUI() {
           <ListItemText>Sign Out</ListItemText>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={() => {
-          setUserMenuAnchorEl(null);
-        }}>
+        <MenuItem onClick={handleDeleteProfile}>
           <ListItemIcon>
             <DeleteIcon />
           </ListItemIcon>
@@ -572,6 +609,7 @@ export default function ChatRoomUI() {
         }}
       >
         <MenuItem onClick={() => {
+          setNewRoomName(selectedRoom?.name || '');
           setShowRenameDialog(true);
           setRoomSettingsAnchorEl(null);
         }}>
@@ -643,10 +681,10 @@ export default function ChatRoomUI() {
             onClick={handleRenameRoom}
             disabled={!newRoomName.trim()}
             sx={{
-              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              background: 'linear-gradient(to right, #2563eb, #9333ea, #f97316)',
               color: 'white',
               '&:hover': {
-                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+                background: 'linear-gradient(to right, #1d4ed8, #7c3aed, #ea580c)',
               },
               '&.Mui-disabled': {
                 background: '#e5e7eb',

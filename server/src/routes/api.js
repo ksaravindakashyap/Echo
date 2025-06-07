@@ -114,4 +114,34 @@ router.delete('/user/delete', authenticateToken, async (req, res) => {
   }
 });
 
+// Health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    // Test database connectivity
+    const { db } = require('../db');
+    
+    // Simple database query to check if it's working
+    await new Promise((resolve, reject) => {
+      db.get('SELECT 1 as test', (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    res.json({ 
+      status: 'healthy', 
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[Health Check] Database error:', error);
+    res.status(500).json({ 
+      status: 'unhealthy', 
+      database: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router; 

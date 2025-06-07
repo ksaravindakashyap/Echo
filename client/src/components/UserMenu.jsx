@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { api } from '../lib/api';
 import {
   IconButton,
   Menu,
@@ -47,12 +48,7 @@ export default function UserMenu() {
 
   const handleDeleteProfile = async () => {
     try {
-      const response = await fetch('/api/user/delete', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.delete('/api/user/delete');
 
       if (response.ok) {
         if (socket) {

@@ -32,7 +32,7 @@ const Login = () => {
   return (
     <div className="min-h-screen flex items-stretch">
       {/* Left Section - Welcome Content */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-orange-500 via-orange-600 to-red-500 p-12 items-center justify-center">
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-purple-600 to-orange-500 p-12 items-center justify-center">
         <div className="max-w-lg text-center">
           <h1 className="text-4xl font-bold text-white mb-4">Welcome to ECHO</h1>
           <p className="text-xl text-white/90">Connect, chat, and collaborate in real-time.</p>
@@ -45,7 +45,7 @@ const Login = () => {
           <div>
             <Link 
               to="/" 
-              className="block text-center text-4xl font-bold bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-transparent bg-clip-text"
+              className="block text-center text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-transparent bg-clip-text hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200"
             >
               ECHO
             </Link>
@@ -125,7 +125,7 @@ const Login = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="group relative w-full flex justify-center py-3 px-4 border border-transparent rounded-lg text-sm font-medium text-white bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 hover:from-orange-600 hover:via-orange-700 hover:to-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                className="group relative w-full flex justify-center py-3 px-4 border border-transparent rounded-lg text-sm font-medium text-white bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
               >
                 {isLoading ? (
                   <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

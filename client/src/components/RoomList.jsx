@@ -67,8 +67,23 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
     // Listen for room updates
     socket.on('room_created', (room) => {
       console.log('[RoomList] New room created:', room);
-      if (!room.isPrivate || room.createdBy === currentUser.id) {
-        setRooms(prev => [...prev, room]);
+      console.log('[RoomList] Room isPrivate:', room.isPrivate);
+      console.log('[RoomList] Room createdBy:', room.createdBy);
+      console.log('[RoomList] Current user:', currentUser.id);
+      
+      // Add the room immediately if:
+      // 1. It's a public room, OR
+      // 2. Current user created this room (including private rooms)
+      if (!room.isPrivate || Number(room.createdBy) === Number(currentUser.id)) {
+        console.log('[RoomList] Adding room to list:', room.name);
+        setRooms(prev => {
+          // Check if room already exists to avoid duplicates
+          const roomExists = prev.some(r => r.id === room.id);
+          if (!roomExists) {
+            return [...prev, room];
+          }
+          return prev;
+        });
       }
     });
 
@@ -78,8 +93,27 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
     });
 
     socket.on('room_updated', (room) => {
-      console.log('[RoomList] Room updated:', room);
-      setRooms(prev => prev.map(r => r.id === room.id ? room : r));
+      console.log('[RoomList] Room updated received:', room);
+      console.log('[RoomList] Current rooms before update:', rooms.map(r => ({ id: r.id, name: r.name, lastMessage: r.lastMessage })));
+      
+      setRooms(prev => {
+        const updatedRooms = prev.map(r => {
+          if (r.id === room.id) {
+            console.log('[RoomList] Updating room:', r.id, 'with new data:', room);
+            // Merge the room data to ensure all fields are preserved
+            return {
+              ...r,
+              ...room,
+              lastMessage: room.lastMessage,
+              lastMessageTime: room.lastMessageTime
+            };
+          }
+          return r;
+        });
+        
+        console.log('[RoomList] Rooms after update:', updatedRooms.map(r => ({ id: r.id, name: r.name, lastMessage: r.lastMessage })));
+        return updatedRooms;
+      });
     });
 
     socket.on('user_joined_room', ({ roomId, userId }) => {
@@ -117,7 +151,8 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
     
     console.log('[RoomList] Creating room:', {
       name: newRoom.name,
-      isPrivate: newRoom.type === 'private'
+      isPrivate: newRoom.type === 'private',
+      currentUser: currentUser.id
     });
     
     socket.emit('create_room', {
@@ -127,16 +162,30 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
       if (response.success) {
         console.log('[RoomList] Room created successfully:', response.room);
         setError('');
+        
+        // Ensure the room is added to the list immediately
+        setRooms(prev => {
+          const roomExists = prev.some(r => r.id === response.room.id);
+          if (!roomExists) {
+            return [...prev, response.room];
+          }
+          return prev;
+        });
+        
         // Store the last created room with its access code
         if (response.room.isPrivate && response.room.accessCode) {
           setLastCreatedRoom(response.room);
           setShowAccessCodeDialog(true);
         }
+        
         setNewRoom({
           name: '',
           type: 'public'
         });
         setShowCreateDialog(false);
+        
+        // Auto-select the newly created room
+        onRoomSelect(response.room);
       } else {
         setError(response.error || 'Failed to create room');
       }
@@ -161,6 +210,23 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
         setError('');
         setShowJoinDialog(false);
         setJoinRoomCode('');
+        
+        // Add the joined room to the list immediately if it's not already there
+        setRooms(prev => {
+          const roomExists = prev.some(room => room.id === response.room.id);
+          if (!roomExists) {
+            return [...prev, response.room];
+          }
+          return prev;
+        });
+        
+        // Also refresh the full room list to ensure consistency
+        socket.emit('get_rooms', {}, (refreshResponse) => {
+          if (refreshResponse.success) {
+            setRooms(refreshResponse.rooms);
+          }
+        });
+        
         onRoomSelect(response.room);
       } else {
         console.error('[RoomList] Failed to join room:', response.error);
@@ -206,6 +272,27 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
     return status || 'offline';
   };
 
+  // Function to format timestamp to IST time
+  const formatTime = (timestamp) => {
+    if (!timestamp) return 'No messages';
+    
+    try {
+      const date = new Date(timestamp);
+      // Convert to IST (Indian Standard Time)
+      const istTime = date.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      return istTime;
+    } catch (error) {
+      console.error('Error formatting timestamp:', error);
+      return 'Invalid time';
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Chat Rooms Header */}
@@ -219,7 +306,7 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
               setError('');
               setShowCreateDialog(true);
             }}
-            className="w-full bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:from-orange-600 hover:via-orange-700 hover:to-red-600 transition-colors"
+            className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200"
           >
             <AddIcon fontSize="small" />
             CREATE ROOM
@@ -278,7 +365,7 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
                       )}
                     </div>
                     <Typography variant="caption" className="text-gray-500">
-                      {room.lastMessageTime || 'No messages'}
+                      {formatTime(room.lastMessageTime)}
                     </Typography>
                   </div>
                   <Typography variant="body2" className="text-gray-500 truncate" sx={{ maxWidth: '200px' }}>
@@ -382,10 +469,10 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
           <Button
             onClick={handleCreateRoom}
             sx={{
-              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              background: 'linear-gradient(to right, #2563eb, #9333ea, #f97316)',
               color: 'white',
               '&:hover': {
-                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+                background: 'linear-gradient(to right, #1d4ed8, #7c3aed, #ea580c)',
               },
             }}
           >
@@ -450,10 +537,10 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
             onClick={handleJoinPrivateRoom}
             disabled={!joinRoomCode}
             sx={{
-              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              background: 'linear-gradient(to right, #2563eb, #9333ea, #f97316)',
               color: 'white',
               '&:hover': {
-                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+                background: 'linear-gradient(to right, #1d4ed8, #7c3aed, #ea580c)',
               },
               '&.Mui-disabled': {
                 background: '#e5e7eb',
@@ -507,10 +594,10 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
           <Button
             onClick={() => setShowAccessCodeDialog(false)}
             sx={{
-              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              background: 'linear-gradient(to right, #2563eb, #9333ea, #f97316)',
               color: 'white',
               '&:hover': {
-                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+                background: 'linear-gradient(to right, #1d4ed8, #7c3aed, #ea580c)',
               },
             }}
           >

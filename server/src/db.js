@@ -12,17 +12,66 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = path.join(dataDir, 'chat.db');
 console.log('[Database] Using database at:', dbPath);
 
-// Create a new database connection
-const db = new sqlite3.Database(dbPath, (err) => {
+// Create a new database connection with improved settings
+const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
   if (err) {
     console.error('[Database] Connection error:', err);
   } else {
     console.log('[Database] Connected to SQLite database');
-    // Enable foreign keys
-    db.run('PRAGMA foreign_keys = ON');
-    createTables();
+    // Configure database for better concurrency and performance
+    db.serialize(() => {
+      // Enable foreign keys
+      db.run('PRAGMA foreign_keys = ON');
+      // Enable WAL mode for better concurrency
+      db.run('PRAGMA journal_mode = WAL');
+      // Set busy timeout to 30 seconds
+      db.run('PRAGMA busy_timeout = 30000');
+      // Optimize synchronization
+      db.run('PRAGMA synchronous = NORMAL');
+      
+      console.log('[Database] PRAGMA settings applied');
+      createTables();
+    });
   }
 });
+
+// Gracefully close database on process exit
+process.on('SIGINT', () => {
+  console.log('[Database] Closing database connection...');
+  db.close((err) => {
+    if (err) {
+      console.error('[Database] Error closing database:', err);
+    } else {
+      console.log('[Database] Database connection closed.');
+    }
+    process.exit(0);
+  });
+});
+
+// Helper function to execute database operations with retry logic
+function executeWithRetry(operation, maxRetries = 3) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    function attemptOperation() {
+      attempts++;
+      operation()
+        .then(resolve)
+        .catch((error) => {
+          // If it's a database busy error and we haven't exceeded max retries
+          if (error.message && error.message.includes('SQLITE_BUSY') && attempts < maxRetries) {
+            console.log(`[Database] Retry attempt ${attempts}/${maxRetries} for database operation`);
+            // Wait before retrying (exponential backoff)
+            setTimeout(attemptOperation, Math.pow(2, attempts) * 100);
+          } else {
+            reject(error);
+          }
+        });
+    }
+    
+    attemptOperation();
+  });
+}
 
 // Create necessary tables
 function createTables() {
@@ -115,41 +164,21 @@ const User = {
     });
   },
 
+  findById: (userId) => {
+    return new Promise((resolve, reject) => {
+      db.get('SELECT * FROM users WHERE id = ?', [userId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  },
+
   delete: (userId) => {
     return new Promise((resolve, reject) => {
-      db.serialize(() => {
-        // First, delete all messages by this user
-        db.run('DELETE FROM messages WHERE user_id = ?', [userId]);
-        
-        // Remove user from all chat rooms they're a member of
-        db.run('DELETE FROM chat_room_members WHERE user_id = ?', [userId]);
-        
-        // Delete rooms created by this user
-        db.all(
-          'SELECT id FROM chat_rooms WHERE created_by = ?',
-          [userId],
-          (err, rooms) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-            
-            // Delete each room and its related data
-            rooms.forEach(room => {
-              db.serialize(() => {
-                db.run('DELETE FROM messages WHERE room_id = ?', [room.id]);
-                db.run('DELETE FROM chat_room_members WHERE room_id = ?', [room.id]);
-                db.run('DELETE FROM chat_rooms WHERE id = ?', [room.id]);
-              });
-            });
-            
-            // Finally, delete the user
-            db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
-              if (err) reject(err);
-              else resolve(true);
-            });
-          }
-        );
+      // SQLite CASCADE will handle the cleanup automatically
+      db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
+        if (err) reject(err);
+        else resolve(true);
       });
     });
   },
@@ -164,28 +193,152 @@ const ChatRoom = {
   create: ({ name, createdBy, isPrivate }) => {
     return new Promise((resolve, reject) => {
       const accessCode = isPrivate ? Math.floor(100000 + Math.random() * 900000).toString() : null;
-      db.run(
-        'INSERT INTO chat_rooms (name, created_by, is_private, access_code) VALUES (?, ?, ?, ?)',
-        [name, createdBy, isPrivate, accessCode],
-        function(err) {
-          if (err) reject(err);
-          else {
+      
+      // Use a transaction to ensure both operations complete successfully
+      db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        
+        db.run(
+          'INSERT INTO chat_rooms (name, created_by, is_private, access_code) VALUES (?, ?, ?, ?)',
+          [name, createdBy, isPrivate, accessCode],
+          function(err) {
+            if (err) {
+              console.error('[Database] Error creating room:', err);
+              db.run('ROLLBACK');
+              reject(new Error(`Failed to create room: ${err.message}`));
+              return;
+            }
+            
+            const roomId = this.lastID;
+            
             // Add creator as first member
             db.run(
               'INSERT INTO chat_room_members (room_id, user_id) VALUES (?, ?)',
-              [this.lastID, createdBy],
+              [roomId, createdBy],
               (err) => {
-                if (err) reject(err);
-                else resolve({ 
-                  id: this.lastID, 
-                  name, 
-                  createdBy, 
-                  isPrivate, 
-                  accessCode 
-                });
+                if (err) {
+                  console.error('[Database] Error adding room member:', err);
+                  db.run('ROLLBACK');
+                  reject(new Error(`Failed to add room member: ${err.message}`));
+                } else {
+                  db.run('COMMIT');
+                  console.log(`[Database] Room created successfully: ${name} (ID: ${roomId})`);
+                  resolve({ 
+                    id: roomId, 
+                    name, 
+                    createdBy, 
+                    isPrivate, 
+                    accessCode 
+                  });
+                }
               }
             );
           }
+        );
+      });
+    });
+  },
+
+  getById: (roomId) => {
+    return new Promise((resolve, reject) => {
+      db.get(
+        `SELECT cr.*, u.username as creator_name
+         FROM chat_rooms cr 
+         LEFT JOIN users u ON cr.created_by = u.id 
+         WHERE cr.id = ?`,
+        [roomId],
+        (err, room) => {
+          if (err) reject(err);
+          else resolve(room);
+        }
+      );
+    });
+  },
+
+  getByAccessCode: (accessCode) => {
+    return new Promise((resolve, reject) => {
+      db.get(
+        `SELECT cr.*, u.username as creator_name
+         FROM chat_rooms cr 
+         LEFT JOIN users u ON cr.created_by = u.id 
+         WHERE cr.access_code = ?`,
+        [accessCode],
+        (err, room) => {
+          if (err) reject(err);
+          else resolve(room);
+        }
+      );
+    });
+  },
+
+  getByUserId: (userId) => {
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT DISTINCT cr.*, u.username as creator_name,
+         CASE WHEN cr.created_by = ? THEN cr.access_code ELSE NULL END as accessCode,
+         (SELECT content FROM messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as lastMessage,
+         (SELECT created_at FROM messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as lastMessageTime
+         FROM chat_rooms cr 
+         LEFT JOIN users u ON cr.created_by = u.id 
+         LEFT JOIN chat_room_members crm ON cr.id = crm.room_id 
+         WHERE (cr.is_private = 0) OR (crm.user_id = ?) OR (cr.created_by = ?)
+         ORDER BY cr.created_at DESC`,
+        [userId, userId, userId],
+        (err, rooms) => {
+          if (err) reject(err);
+          else {
+            // Convert database format to expected format
+            const formattedRooms = rooms.map(room => ({
+              id: room.id,
+              name: room.name,
+              isPrivate: Boolean(room.is_private),
+              accessCode: room.accessCode,
+              createdBy: room.created_by,
+              createdAt: room.created_at,
+              lastMessage: room.lastMessage,
+              lastMessageTime: room.lastMessageTime
+            }));
+            resolve(formattedRooms);
+          }
+        }
+      );
+    });
+  },
+
+  getCreatedByUserId: (userId) => {
+    return new Promise((resolve, reject) => {
+      db.all(
+        'SELECT * FROM chat_rooms WHERE created_by = ?',
+        [userId],
+        (err, rooms) => {
+          if (err) reject(err);
+          else resolve(rooms);
+        }
+      );
+    });
+  },
+
+  addMember: (roomId, userId) => {
+    return new Promise((resolve, reject) => {
+      db.run(
+        'INSERT OR IGNORE INTO chat_room_members (room_id, user_id) VALUES (?, ?)',
+        [roomId, userId],
+        (err) => {
+          if (err) reject(err);
+          else resolve(true);
+        }
+      );
+    });
+  },
+
+  isMember: (roomId, userId) => {
+    return new Promise((resolve, reject) => {
+      db.get(
+        'SELECT 1 FROM chat_room_members WHERE room_id = ? AND user_id = ?',
+        [roomId, userId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(!!row);
         }
       );
     });
@@ -224,127 +377,49 @@ const ChatRoom = {
     });
   },
 
-  join: (roomId, userId, accessCode = null) => {
+  delete: (roomId) => {
     return new Promise((resolve, reject) => {
-      // Check if room exists and if private, verify access code
-      db.get(
-        'SELECT * FROM chat_rooms WHERE id = ?',
-        [roomId],
-        (err, room) => {
-          if (err) reject(err);
-          else if (!room) reject(new Error('Room not found'));
-          else if (room.is_private && room.access_code !== accessCode) {
-            reject(new Error('Invalid access code'));
+      // SQLite will handle cascading deletes due to foreign key constraints
+      db.run('DELETE FROM chat_rooms WHERE id = ?', [roomId], (err) => {
+        if (err) reject(err);
+        else resolve(true);
+      });
+    });
+  },
+
+  updateLastMessage: (roomId, lastMessage) => {
+    return new Promise((resolve, reject) => {
+      // For now, we don't store last message in the room table
+      // This is just to prevent errors, could be implemented later
+      resolve(true);
+    });
+  }
+};
+
+// Message methods
+const Message = {
+  create: ({ roomId, userId, content }) => {
+    return new Promise((resolve, reject) => {
+      db.run(
+        'INSERT INTO messages (room_id, user_id, content) VALUES (?, ?, ?)',
+        [roomId, userId, content],
+        function(err) {
+          if (err) {
+            reject(err);
           } else {
-            db.run(
-              'INSERT OR IGNORE INTO chat_room_members (room_id, user_id) VALUES (?, ?)',
-              [roomId, userId],
-              (err) => {
-                if (err) reject(err);
-                else resolve(room);
-              }
-            );
-          }
-        }
-      );
-    });
-  },
-
-  getPublicRooms: () => {
-    return new Promise((resolve, reject) => {
-      db.all(
-        `SELECT cr.*, u.username as creator_name, 
-         COUNT(crm.user_id) as member_count 
-         FROM chat_rooms cr 
-         LEFT JOIN users u ON cr.created_by = u.id 
-         LEFT JOIN chat_room_members crm ON cr.id = crm.room_id 
-         WHERE cr.is_private = 0 
-         GROUP BY cr.id`,
-        [],
-        (err, rooms) => {
-          if (err) reject(err);
-          else resolve(rooms);
-        }
-      );
-    });
-  },
-
-  getUserRooms: (userId) => {
-    return new Promise((resolve, reject) => {
-      db.all(
-        `SELECT cr.*, u.username as creator_name, 
-         COUNT(crm2.user_id) as member_count 
-         FROM chat_rooms cr 
-         JOIN chat_room_members crm ON cr.id = crm.room_id 
-         LEFT JOIN users u ON cr.created_by = u.id 
-         LEFT JOIN chat_room_members crm2 ON cr.id = crm2.room_id 
-         WHERE crm.user_id = ? 
-         GROUP BY cr.id`,
-        [userId],
-        (err, rooms) => {
-          if (err) reject(err);
-          else resolve(rooms);
-        }
-      );
-    });
-  },
-
-  delete: (roomId, userId) => {
-    return new Promise((resolve, reject) => {
-      // Check if user is the creator
-      db.get(
-        'SELECT * FROM chat_rooms WHERE id = ? AND created_by = ?',
-        [roomId, userId],
-        (err, room) => {
-          if (err) reject(err);
-          else if (!room) reject(new Error('Not authorized to delete this room'));
-          else {
-            // Delete all related data
-            db.serialize(() => {
-              db.run('DELETE FROM messages WHERE room_id = ?', [roomId]);
-              db.run('DELETE FROM chat_room_members WHERE room_id = ?', [roomId]);
-              db.run('DELETE FROM chat_rooms WHERE id = ?', [roomId], (err) => {
-                if (err) reject(err);
-                else resolve(true);
-              });
-            });
-          }
-        }
-      );
-    });
-  },
-
-  rename: (roomId, userId, newName) => {
-    return new Promise((resolve, reject) => {
-      // Check if user is the creator
-      db.get(
-        'SELECT * FROM chat_rooms WHERE id = ? AND created_by = ?',
-        [roomId, userId],
-        (err, room) => {
-          if (err) reject(err);
-          else if (!room) reject(new Error('Not authorized to rename this room'));
-          else {
-            db.run(
-              'UPDATE chat_rooms SET name = ? WHERE id = ?',
-              [newName, roomId],
-              (err) => {
-                if (err) reject(err);
-                else {
-                  // Get updated room data
-                  db.get(
-                    `SELECT cr.*, u.username as creator_name, 
-                     COUNT(crm.user_id) as member_count 
-                     FROM chat_rooms cr 
-                     LEFT JOIN users u ON cr.created_by = u.id 
-                     LEFT JOIN chat_room_members crm ON cr.id = crm.room_id 
-                     WHERE cr.id = ?
-                     GROUP BY cr.id`,
-                    [roomId],
-                    (err, updatedRoom) => {
-                      if (err) reject(err);
-                      else resolve(updatedRoom);
-                    }
-                  );
+            // Get the saved message with user info and correct format
+            db.get(
+              `SELECT m.id, m.room_id as roomId, m.user_id as userId, 
+               m.content, m.created_at as timestamp, u.username 
+               FROM messages m 
+               JOIN users u ON m.user_id = u.id 
+               WHERE m.id = ?`,
+              [this.lastID],
+              (err, message) => {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve(message);
                 }
               }
             );
@@ -354,10 +429,11 @@ const ChatRoom = {
     });
   },
 
-  getMessages: (roomId) => {
+  getByRoomId: (roomId) => {
     return new Promise((resolve, reject) => {
       db.all(
-        `SELECT m.*, u.username 
+        `SELECT m.id, m.room_id as roomId, m.user_id as userId, 
+         m.content, m.created_at as timestamp, u.username 
          FROM messages m 
          JOIN users u ON m.user_id = u.id 
          WHERE m.room_id = ? 
@@ -369,60 +445,7 @@ const ChatRoom = {
         }
       );
     });
-  },
-
-  getFullDetails: (roomId, userId) => {
-    return new Promise((resolve, reject) => {
-      db.get(
-        `SELECT cr.*, u.username as creator_name,
-         COUNT(crm.user_id) as member_count,
-         CASE WHEN cr.created_by = ? THEN cr.access_code ELSE NULL END as access_code
-         FROM chat_rooms cr 
-         LEFT JOIN users u ON cr.created_by = u.id 
-         LEFT JOIN chat_room_members crm ON cr.id = crm.room_id 
-         WHERE cr.id = ?
-         GROUP BY cr.id`,
-        [userId, roomId],
-        (err, room) => {
-          if (err) reject(err);
-          else resolve(room);
-        }
-      );
-    });
-  },
-
-  saveMessage: (message) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO messages (room_id, user_id, content) VALUES (?, ?, ?)',
-        [message.roomId, message.userId, message.content],
-        function(err) {
-          if (err) {
-            console.error('[Database] Error saving message:', err);
-            reject(err);
-          } else {
-            // Get the saved message with username
-            db.get(
-              `SELECT m.*, u.username 
-               FROM messages m 
-               JOIN users u ON m.user_id = u.id 
-               WHERE m.id = ?`,
-              [this.lastID],
-              (err, savedMessage) => {
-                if (err) {
-                  console.error('[Database] Error fetching saved message:', err);
-                  reject(err);
-                } else {
-                  console.log('[Database] Message saved:', savedMessage);
-                  resolve(savedMessage);
-                }
-              }
-            );
-          }
-        }
-      );
-    });
   }
 };
 
-module.exports = { db, User, ChatRoom }; 
+module.exports = { db, User, ChatRoom, Message }; 

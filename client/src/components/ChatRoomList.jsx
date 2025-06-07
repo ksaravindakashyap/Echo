@@ -209,7 +209,7 @@ const ChatRoomList = ({ onRoomSelect }) => {
           >
             <ListItemText 
               primary={room.name}
-              secondary={room.createdBy === user?.id ? '(Creator)' : ''}
+              secondary={Number(room.createdBy) === Number(user?.id) ? '(Creator)' : ''}
             />
             <ListItemSecondaryAction className="room-actions" sx={{ opacity: 0, transition: 'opacity 0.2s' }}>
               {room.isPrivate ? (
@@ -221,7 +221,7 @@ const ChatRoomList = ({ onRoomSelect }) => {
                   <LockOpenIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                 </Tooltip>
               )}
-              {room.createdBy === user?.id && (
+              {Number(room.createdBy) === Number(user?.id) && (
                 <IconButton
                   edge="end"
                   size="small"

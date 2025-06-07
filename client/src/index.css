@@ -67,8 +67,26 @@
 }
 
 @layer components {
+  /* ECHO Standard Gradient */
+  .echo-gradient {
+    @apply bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500;
+  }
+  
+  .echo-gradient-hover {
+    @apply hover:from-blue-700 hover:via-purple-700 hover:to-orange-600;
+  }
+  
+  .echo-gradient-text {
+    @apply bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-transparent bg-clip-text;
+  }
+  
+  .echo-gradient-text-hover {
+    @apply hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200;
+  }
+  
+  /* Button Styles */
   .btn-primary {
-    @apply bg-orange-500 text-white font-semibold rounded-lg px-6 py-3 shadow-md hover:bg-orange-600 transition-colors;
+    @apply bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white font-semibold rounded-lg px-6 py-3 shadow-md hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200;
   }
   
   .btn-secondary {
