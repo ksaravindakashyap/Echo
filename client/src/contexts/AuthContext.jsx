@@ -18,11 +18,23 @@ export const AuthProvider = ({ children }) => {
     // Check for stored auth data
     const storedAuth = localStorage.getItem('auth');
     if (storedAuth) {
-      const authData = JSON.parse(storedAuth);
-      setUser(authData.user);
-      // Authenticate socket connection
-      if (socket && authData.user) {
-        socket.emit('authenticate', { userId: authData.user.id });
+      try {
+        const authData = JSON.parse(storedAuth);
+        console.log('[Auth] Restoring auth from storage:', authData);
+        if (authData.user && authData.user.id) {
+          setUser(authData.user);
+          // Authenticate socket connection
+          if (socket) {
+            console.log('[Auth] Authenticating socket with user:', authData.user.id);
+            socket.emit('authenticate', { userId: authData.user.id });
+          }
+        } else {
+          console.log('[Auth] Invalid user data in storage');
+          localStorage.removeItem('auth');
+        }
+      } catch (error) {
+        console.error('[Auth] Error restoring auth:', error);
+        localStorage.removeItem('auth');
       }
     }
     setLoading(false);
@@ -30,6 +42,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
+      console.log('[Auth] Attempting login...');
       const response = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: {
@@ -44,18 +57,25 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Login failed');
       }
 
+      if (!data.user || !data.user.id) {
+        throw new Error('Invalid user data received from server');
+      }
+
+      console.log('[Auth] Login successful, user:', data.user);
       // Store auth data
       localStorage.setItem('auth', JSON.stringify(data));
       setUser(data.user);
 
       // Authenticate socket connection
       if (socket) {
+        console.log('[Auth] Authenticating socket after login:', data.user.id);
         socket.emit('authenticate', { userId: data.user.id });
       }
 
-      navigate('/');
+      navigate('/chat');
       return { success: true };
     } catch (error) {
+      console.error('[Auth] Login error:', error);
       return { success: false, error: error.message };
     }
   };
@@ -85,7 +105,7 @@ export const AuthProvider = ({ children }) => {
         socket.emit('authenticate', { userId: data.user.id });
       }
 
-      navigate('/');
+      navigate('/chat');
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -93,15 +113,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    // Only remove auth data and user state
-    localStorage.removeItem('auth');
-    setUser(null);
-
-    // Emit a logout event to the socket but don't disconnect
+    console.log('[Auth] Logging out...');
     if (socket) {
       socket.emit('user_logout');
     }
-
+    localStorage.removeItem('auth');
+    setUser(null);
     navigate('/login');
   };
 

@@ -1,102 +1,170 @@
 import React, { useState, useEffect } from 'react';
-import { IconButton, Menu, MenuItem, ListItemIcon, ListItemText, Dialog, DialogTitle, DialogContent, TextField, DialogActions, Button, Typography, Box, List, ListItem, Avatar, FormControlLabel, Radio, RadioGroup, FormControl, FormLabel, Alert } from '@mui/material';
-import { Add as AddIcon, MoreVert as MoreVertIcon, Lock as LockIcon, LockOpen as LockOpenIcon, ContentCopy as ContentCopyIcon } from '@mui/icons-material';
-import { useAuth } from '../contexts/AuthContext';
+import { IconButton, Dialog, DialogTitle, DialogContent, TextField, DialogActions, Button, Typography, List, ListItem, Avatar, FormControlLabel, Radio, RadioGroup, FormControl, FormLabel, Alert } from '@mui/material';
+import { Add as AddIcon, Lock as LockIcon, LockOpen as LockOpenIcon, ContentCopy as ContentCopyIcon } from '@mui/icons-material';
+import { LockClosedIcon } from "@radix-ui/react-icons";
+import { useSocket } from '../contexts/SocketContext';
 
-const RoomList = ({ socket, onRoomSelect, selectedRoom }) => {
-  const { user } = useAuth();
+const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }) => {
+  const { socket } = useSocket();
   const [rooms, setRooms] = useState([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   const [showAccessCodeDialog, setShowAccessCodeDialog] = useState(false);
+  const [error, setError] = useState('');
   const [newRoom, setNewRoom] = useState({
     name: '',
-    type: 'public',
-    accessCode: ''
+    type: 'public'
   });
   const [joinRoomCode, setJoinRoomCode] = useState('');
   const [lastCreatedRoom, setLastCreatedRoom] = useState(null);
+  const [userStatuses, setUserStatuses] = useState(() => {
+    // Initialize with current user's status if available
+    const initialStatuses = new Map();
+    if (currentUser?.id) {
+      initialStatuses.set(currentUser.id, currentUserStatus || 'offline');
+    }
+    return initialStatuses;
+  });
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !currentUser?.id) {
+      console.log('[RoomList] No socket or current user');
+      return;
+    }
 
-    const handleRoomCreated = (room) => {
-      console.log('Room created event received:', room);
-      setRooms(prev => {
-        const exists = prev.some(r => r.id === room.id);
-        if (!exists) {
-          return [...prev, room];
-        }
-        return prev;
+    console.log('[RoomList] Setting up socket listeners');
+    console.log('[RoomList] Current user:', currentUser.id);
+    console.log('[RoomList] Current user status:', currentUserStatus);
+
+    // Update current user's status whenever it changes
+    if (currentUser.id && currentUserStatus) {
+      console.log(`[RoomList] Updating current user ${currentUser.id} status to ${currentUserStatus}`);
+      setUserStatuses(prev => {
+        const next = new Map(prev);
+        next.set(currentUser.id, currentUserStatus);
+        return next;
       });
-      
-      if (room.isPrivate && room.accessCode) {
-        setLastCreatedRoom(room);
-        setShowAccessCodeDialog(true);
-      }
-      onRoomSelect(room);
-    };
+    }
 
-    const handleRoomJoined = (room) => {
-      setRooms(prev => {
-        const exists = prev.some(r => r.id === room.id);
-        if (!exists) {
-          return [...prev, room];
-        }
-        return prev.map(r => r.id === room.id ? room : r);
+    // Listen for user status updates
+    socket.on('user_status_update', ({ userId, status }) => {
+      console.log(`[RoomList] Status update for user ${userId}: ${status}`);
+      setUserStatuses(prev => {
+        const next = new Map(prev);
+        next.set(userId, status);
+        return next;
       });
-      onRoomSelect(room);
-    };
-
-    socket.on('room_created', handleRoomCreated);
-    socket.on('room_joined', handleRoomJoined);
-    socket.on('room_updated', (room) => {
-      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, ...room } : r));
     });
 
     // Get initial rooms
     socket.emit('get_rooms', {}, (response) => {
       if (response.success) {
-        console.log('Received rooms:', response.rooms);
+        console.log('[RoomList] Received initial rooms:', response.rooms);
         setRooms(response.rooms);
       }
     });
 
+    // Listen for room updates
+    socket.on('room_created', (room) => {
+      console.log('[RoomList] New room created:', room);
+      if (!room.isPrivate || room.createdBy === currentUser.id) {
+        setRooms(prev => [...prev, room]);
+      }
+    });
+
+    socket.on('room_deleted', ({ roomId }) => {
+      console.log('[RoomList] Room deleted:', roomId);
+      setRooms(prev => prev.filter(r => r.id !== roomId));
+    });
+
+    socket.on('room_updated', (room) => {
+      console.log('[RoomList] Room updated:', room);
+      setRooms(prev => prev.map(r => r.id === room.id ? room : r));
+    });
+
+    socket.on('user_joined_room', ({ roomId, userId }) => {
+      console.log(`[RoomList] User ${userId} joined room ${roomId}`);
+      if (userId === currentUser.id) {
+        // Refresh rooms list when we join a room
+        socket.emit('get_rooms', {}, (response) => {
+          if (response.success) {
+            setRooms(response.rooms);
+          }
+        });
+      }
+    });
+
     return () => {
-      socket.off('room_created', handleRoomCreated);
-      socket.off('room_joined', handleRoomJoined);
+      console.log('[RoomList] Cleaning up socket listeners');
+      socket.off('room_created');
+      socket.off('room_deleted');
       socket.off('room_updated');
+      socket.off('user_joined_room');
+      socket.off('user_status_update');
     };
-  }, [socket, onRoomSelect]);
+  }, [socket, currentUser?.id]);
 
   const handleCreateRoom = () => {
-    if (!newRoom.name.trim()) return;
+    if (!socket) {
+      setError('Socket connection not available');
+      return;
+    }
+
+    if (!newRoom.name.trim()) {
+      setError('Room name is required');
+      return;
+    }
     
-    console.log('Creating room:', {
+    console.log('[RoomList] Creating room:', {
       name: newRoom.name,
       isPrivate: newRoom.type === 'private'
     });
     
-    socket.emit('createRoom', {
+    socket.emit('create_room', {
       name: newRoom.name,
       isPrivate: newRoom.type === 'private'
+    }, (response) => {
+      if (response.success) {
+        console.log('[RoomList] Room created successfully:', response.room);
+        setError('');
+        // Store the last created room with its access code
+        if (response.room.isPrivate && response.room.accessCode) {
+          setLastCreatedRoom(response.room);
+          setShowAccessCodeDialog(true);
+        }
+        setNewRoom({
+          name: '',
+          type: 'public'
+        });
+        setShowCreateDialog(false);
+      } else {
+        setError(response.error || 'Failed to create room');
+      }
     });
-    
-    setNewRoom({
-      name: '',
-      type: 'public',
-      accessCode: ''
-    });
-    setShowCreateDialog(false);
   };
 
   const handleJoinPrivateRoom = () => {
-    if (!joinRoomCode.trim() || joinRoomCode.length !== 6) return;
+    if (!socket) {
+      setError('Socket connection not available');
+      return;
+    }
+
+    if (!joinRoomCode.trim() || joinRoomCode.length !== 6) {
+      setError('Invalid access code');
+      return;
+    }
+
+    console.log('[RoomList] Attempting to join private room with access code:', joinRoomCode);
     socket.emit('join_room', { accessCode: joinRoomCode }, (response) => {
       if (response.success) {
+        console.log('[RoomList] Successfully joined room:', response.room);
+        setError('');
         setShowJoinDialog(false);
         setJoinRoomCode('');
         onRoomSelect(response.room);
+      } else {
+        console.error('[RoomList] Failed to join room:', response.error);
+        setError(response.error || 'Failed to join room');
       }
     });
   };
@@ -107,24 +175,61 @@ const RoomList = ({ socket, onRoomSelect, selectedRoom }) => {
     }
   };
 
+  // Function to get status color
+  const getStatusColor = (status) => {
+    console.log('[RoomList] Getting color for status:', status);
+    switch (status) {
+      case 'online':
+        return 'bg-green-500';
+      case 'away':
+        return 'bg-yellow-500';
+      case 'offline':
+      default:
+        return 'bg-gray-400';
+    }
+  };
+
+  // Function to get user status
+  const getUserStatus = (userId) => {
+    if (!userId) {
+      console.log('[RoomList] No userId provided for status check');
+      return 'offline';
+    }
+
+    if (userId === currentUser?.id) {
+      console.log(`[RoomList] Getting status for current user: ${currentUserStatus}`);
+      return currentUserStatus || 'offline';
+    }
+
+    const status = userStatuses.get(userId);
+    console.log(`[RoomList] Getting status for user ${userId}:`, status);
+    return status || 'offline';
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Chat Rooms Header */}
       <div className="p-4">
-        <Typography variant="h6" className="text-gray-800 mb-4">
+        <Typography variant="h6" className="text-gray-900 mb-4">
           Chat Rooms
         </Typography>
         <div className="space-y-2">
           <button
-            onClick={() => setShowCreateDialog(true)}
-            className="w-full bg-[#6366f1] text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-[#4f46e5] transition-colors"
+            onClick={() => {
+              setError('');
+              setShowCreateDialog(true);
+            }}
+            className="w-full bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:from-orange-600 hover:via-orange-700 hover:to-red-600 transition-colors"
           >
             <AddIcon fontSize="small" />
             CREATE ROOM
           </button>
           <button
-            onClick={() => setShowJoinDialog(true)}
-            className="w-full border border-[#6366f1] text-[#6366f1] py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
+            onClick={() => {
+              setError('');
+              setShowJoinDialog(true);
+            }}
+            className="w-full border border-orange-500 text-orange-600 py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-orange-50 transition-colors"
           >
             <LockIcon fontSize="small" />
             JOIN PRIVATE ROOM
@@ -139,30 +244,37 @@ const RoomList = ({ socket, onRoomSelect, selectedRoom }) => {
             <ListItem
               key={room.id}
               onClick={() => onRoomSelect(room)}
-              className={`cursor-pointer hover:bg-gray-50 ${
-                selectedRoom?.id === room.id ? 'bg-gray-100' : ''
+              className={`cursor-pointer hover:bg-orange-50 transition-colors ${
+                selectedRoom?.id === room.id ? 'bg-orange-100' : ''
               }`}
               sx={{ py: 1.5 }}
             >
               <div className="flex items-center w-full">
-                <Avatar 
-                  sx={{ 
-                    bgcolor: '#6366f1',
-                    width: 40,
-                    height: 40,
-                    fontSize: '1rem'
-                  }}
-                >
-                  {room.name.slice(0, 2).toUpperCase()}
-                </Avatar>
+                <div className="relative">
+                  <Avatar 
+                    sx={{ 
+                      background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+                      width: 40,
+                      height: 40,
+                      fontSize: '1rem'
+                    }}
+                  >
+                    {room.name.slice(0, 2).toUpperCase()}
+                  </Avatar>
+                  {/* Status Indicator */}
+                  <div 
+                    className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${getStatusColor(getUserStatus(room.createdBy))}`}
+                    title={`${getUserStatus(room.createdBy)}`}
+                  ></div>
+                </div>
                 <div className="ml-3 flex-1">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Typography variant="subtitle2" className="font-medium">
+                      <Typography variant="subtitle2" className="font-medium text-gray-900">
                         {room.name}
                       </Typography>
                       {room.isPrivate && (
-                        <LockIcon fontSize="small" className="text-gray-400" />
+                        <LockClosedIcon className="text-orange-500 w-4 h-4" />
                       )}
                     </div>
                     <Typography variant="caption" className="text-gray-500">
@@ -182,158 +294,224 @@ const RoomList = ({ socket, onRoomSelect, selectedRoom }) => {
       {/* Create Room Dialog */}
       <Dialog 
         open={showCreateDialog} 
-        onClose={() => setShowCreateDialog(false)}
+        onClose={() => {
+          setError('');
+          setShowCreateDialog(false);
+        }}
         PaperProps={{
           sx: {
-            borderRadius: 2,
-            minWidth: 400
+            borderRadius: '0.5rem',
+            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
           }
         }}
       >
-        <DialogTitle>Create New Room</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+          Create New Chat Room
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
           <TextField
             autoFocus
             margin="dense"
             label="Room Name"
             fullWidth
             value={newRoom.name}
-            onChange={(e) => setNewRoom(prev => ({ ...prev, name: e.target.value }))}
-            sx={{ mb: 3 }}
+            onChange={(e) => setNewRoom({ ...newRoom, name: e.target.value })}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '&.Mui-focused fieldset': {
+                  borderColor: '#f97316',
+                },
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#f97316',
+              },
+            }}
           />
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Room Type</FormLabel>
+          <FormControl component="fieldset" sx={{ mt: 2 }}>
+            <FormLabel component="legend" sx={{ color: 'text.primary', '&.Mui-focused': { color: '#f97316' } }}>
+              Room Type
+            </FormLabel>
             <RadioGroup
               value={newRoom.type}
-              onChange={(e) => setNewRoom(prev => ({ ...prev, type: e.target.value }))}
+              onChange={(e) => setNewRoom({ ...newRoom, type: e.target.value })}
             >
               <FormControlLabel 
                 value="public" 
-                control={<Radio />} 
-                label={
-                  <div className="flex items-center gap-2">
-                    <LockOpenIcon fontSize="small" />
-                    <span>Public Room</span>
-                  </div>
-                }
+                control={
+                  <Radio 
+                    sx={{
+                      '&.Mui-checked': {
+                        color: '#f97316',
+                      },
+                    }}
+                  />
+                } 
+                label="Public Room" 
               />
               <FormControlLabel 
                 value="private" 
-                control={<Radio />} 
-                label={
-                  <div className="flex items-center gap-2">
-                    <LockIcon fontSize="small" />
-                    <span>Private Room (6-digit code will be generated)</span>
-                  </div>
-                }
+                control={
+                  <Radio 
+                    sx={{
+                      '&.Mui-checked': {
+                        color: '#f97316',
+                      },
+                    }}
+                  />
+                } 
+                label="Private Room" 
               />
             </RadioGroup>
           </FormControl>
         </DialogContent>
-        <DialogActions sx={{ p: 2.5 }}>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
           <Button 
-            onClick={() => setShowCreateDialog(false)}
-            sx={{ color: 'gray' }}
+            onClick={() => {
+              setError('');
+              setShowCreateDialog(false);
+            }}
+            sx={{ color: 'text.secondary' }}
           >
             Cancel
           </Button>
           <Button
             onClick={handleCreateRoom}
-            variant="contained"
-            disabled={!newRoom.name.trim()}
             sx={{
-              bgcolor: '#6366f1',
+              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              color: 'white',
               '&:hover': {
-                bgcolor: '#4f46e5'
-              }
+                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+              },
             }}
           >
-            Create Room
+            Create
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Join Private Room Dialog */}
-      <Dialog
-        open={showJoinDialog}
-        onClose={() => setShowJoinDialog(false)}
+      {/* Join Room Dialog */}
+      <Dialog 
+        open={showJoinDialog} 
+        onClose={() => {
+          setError('');
+          setShowJoinDialog(false);
+        }}
         PaperProps={{
           sx: {
-            borderRadius: 2,
-            minWidth: 400
+            borderRadius: '0.5rem',
+            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
           }
         }}
       >
-        <DialogTitle>Join Private Room</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+          Join Private Room
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
           <TextField
-            autoFocus
             margin="dense"
-            label="Enter 6-digit Room Code"
+            label="Access Code"
+            type="text"
             fullWidth
             value={joinRoomCode}
-            onChange={(e) => setJoinRoomCode(e.target.value.slice(0, 6))}
-            inputProps={{ maxLength: 6 }}
-            sx={{ mt: 2 }}
+            onChange={(e) => setJoinRoomCode(e.target.value)}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '&.Mui-focused fieldset': {
+                  borderColor: '#f97316',
+                },
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#f97316',
+              },
+            }}
           />
         </DialogContent>
-        <DialogActions sx={{ p: 2.5 }}>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
           <Button 
-            onClick={() => setShowJoinDialog(false)}
-            sx={{ color: 'gray' }}
+            onClick={() => {
+              setError('');
+              setShowJoinDialog(false);
+            }}
+            sx={{ color: 'text.secondary' }}
           >
             Cancel
           </Button>
           <Button
             onClick={handleJoinPrivateRoom}
-            variant="contained"
-            disabled={joinRoomCode.length !== 6}
+            disabled={!joinRoomCode}
             sx={{
-              bgcolor: '#6366f1',
+              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              color: 'white',
               '&:hover': {
-                bgcolor: '#4f46e5'
-              }
+                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+              },
+              '&.Mui-disabled': {
+                background: '#e5e7eb',
+                color: '#9ca3af',
+              },
             }}
           >
-            Join Room
+            Join
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Access Code Dialog */}
-      <Dialog
-        open={showAccessCodeDialog}
+      <Dialog 
+        open={showAccessCodeDialog} 
         onClose={() => setShowAccessCodeDialog(false)}
         PaperProps={{
           sx: {
-            borderRadius: 2,
-            minWidth: 400
+            borderRadius: '0.5rem',
+            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
           }
         }}
       >
-        <DialogTitle>Room Created Successfully</DialogTitle>
-        <DialogContent>
-          <Alert severity="success" sx={{ mb: 2 }}>
-            Your private room has been created! Share this code with others to let them join:
+        <DialogTitle sx={{ borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+          Room Access Code
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          <Alert 
+            severity="success"
+            sx={{ mb: 2 }}
+          >
+            Room created successfully! Here's your access code:
           </Alert>
-          <div className="flex items-center justify-between p-4 bg-gray-100 rounded-lg">
-            <Typography variant="h4" sx={{ letterSpacing: 4 }}>
+          <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+            <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 'medium' }}>
               {lastCreatedRoom?.accessCode}
             </Typography>
-            <IconButton onClick={handleCopyAccessCode} color="primary">
-              <ContentCopyIcon />
+            <IconButton
+              size="small"
+              onClick={handleCopyAccessCode}
+              sx={{ color: '#f97316' }}
+            >
+              <ContentCopyIcon fontSize="small" />
             </IconButton>
           </div>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Share this code with others to let them join your room
+          </Typography>
         </DialogContent>
-        <DialogActions sx={{ p: 2.5 }}>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
           <Button
             onClick={() => setShowAccessCodeDialog(false)}
-            variant="contained"
             sx={{
-              bgcolor: '#6366f1',
+              background: 'linear-gradient(to right, #f97316, #ea580c, #dc2626)',
+              color: 'white',
               '&:hover': {
-                bgcolor: '#4f46e5'
-              }
+                background: 'linear-gradient(to right, #ea580c, #dc2626, #b91c1c)',
+              },
             }}
           >
             Done

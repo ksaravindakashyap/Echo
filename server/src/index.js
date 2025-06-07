@@ -46,13 +46,11 @@ const generateRoomCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Socket authentication middleware (optional for development)
+// Socket authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) {
-    // For development, allow connection without token
-    socket.userId = 'anonymous';
-    return next();
+    return next(new Error('Authentication required'));
   }
   
   try {
@@ -63,17 +61,27 @@ io.use((socket, next) => {
     socket.userId = decoded.userId;
     next();
   } catch (err) {
-    // For development, allow connection even if token is invalid
-    socket.userId = 'anonymous';
-    next();
+    return next(new Error('Invalid token'));
   }
 });
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
+  socket.on('authenticate', ({ userId }) => {
+    console.log('User authenticated:', userId);
+    users.set(socket.id, userId);
+    
+    // Join all rooms the user is a member of
+    rooms.forEach((room, roomId) => {
+      if (room.participants.includes(userId)) {
+        socket.join(roomId);
+      }
+    });
+  });
+
   // Handle room creation
-  socket.on('createRoom', async (data, callback) => {
+  socket.on('create_room', async (data, callback) => {
     try {
       console.log('Creating room:', data);
       const roomId = Math.random().toString(36).substring(7);
@@ -141,7 +149,15 @@ io.on('connection', (socket) => {
       
       // Get all public rooms and private rooms where user is a participant
       const userRooms = Array.from(rooms.values())
-        .filter(room => !room.isPrivate || room.participants.includes(socket.userId))
+        .filter(room => {
+          // Include room if:
+          // 1. It's public, or
+          // 2. User is a participant, or
+          // 3. User created the room
+          return !room.isPrivate || 
+                 room.participants.includes(socket.userId) ||
+                 room.createdBy === socket.userId;
+        })
         .map(room => ({
           ...room,
           // Only include access code if user created the private room
@@ -152,7 +168,9 @@ io.on('connection', (socket) => {
         id: r.id,
         name: r.name,
         isPrivate: r.isPrivate,
-        hasAccessCode: !!r.accessCode
+        hasAccessCode: !!r.accessCode,
+        isParticipant: r.participants.includes(socket.userId),
+        isCreator: r.createdBy === socket.userId
       })));
       
       if (callback) {
@@ -175,20 +193,24 @@ io.on('connection', (socket) => {
         // Join by access code
         const roomId = roomCodes.get(data.accessCode);
         if (!roomId) {
+          console.log('Invalid access code:', data.accessCode);
           throw new Error('Invalid access code');
         }
         room = rooms.get(roomId);
+        console.log('Found room by access code:', room);
       } else {
         // Join by room ID
         room = rooms.get(data.roomId);
       }
       
       if (!room) {
+        console.log('Room not found');
         throw new Error('Room not found');
       }
       
-      if (room.isPrivate && !room.participants.includes(socket.userId) && room.accessCode !== data.accessCode) {
-        throw new Error('Cannot join private room without access code');
+      if (room.isPrivate && !room.participants.includes(socket.userId) && (!data.accessCode || room.accessCode !== data.accessCode)) {
+        console.log('Cannot join private room - invalid access code');
+        throw new Error('Cannot join private room without valid access code');
       }
       
       if (!room.participants.includes(socket.userId)) {
@@ -203,6 +225,8 @@ io.on('connection', (socket) => {
         userId: socket.userId,
         timestamp: new Date().toISOString()
       });
+      
+      console.log('User', socket.userId, 'joined room:', room.id);
       
       if (callback) {
         callback({ 
@@ -285,14 +309,15 @@ io.on('connection', (socket) => {
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    const userId = users.get(socket.id);
     users.delete(socket.id);
     
     // Notify all rooms where the user was a participant
     rooms.forEach((room, roomId) => {
-      if (room.participants.includes(socket.userId)) {
+      if (room.participants.includes(userId)) {
         io.to(roomId).emit('user_left_room', {
           roomId,
-          userId: socket.userId,
+          userId,
           timestamp: new Date().toISOString()
         });
       }

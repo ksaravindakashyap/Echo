@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 
-const Login = () => {
-  const { login } = useAuth();
+const Register = () => {
+  const { register } = useAuth();
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -14,12 +15,17 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      const result = await login(email, password);
+      const result = await register(email, username, password);
       if (!result.success) {
-        throw new Error(result.error || 'Failed to sign in');
+        throw new Error(result.error || 'Failed to create account');
       }
     } catch (err) {
       console.error('Auth error:', err);
@@ -35,11 +41,11 @@ const Login = () => {
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-orange-500 via-orange-600 to-red-500 p-12 items-center justify-center">
         <div className="max-w-lg text-center">
           <h1 className="text-4xl font-bold text-white mb-4">Welcome to ECHO</h1>
-          <p className="text-xl text-white/90">Connect, chat, and collaborate in real-time.</p>
+          <p className="text-xl text-white/90">Join our community and start chatting today.</p>
         </div>
       </div>
 
-      {/* Right Section - Login Form */}
+      {/* Right Section - Register Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
         <div className="max-w-md w-full space-y-8">
           <div>
@@ -50,15 +56,15 @@ const Login = () => {
               ECHO
             </Link>
             <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-              Sign in to your account
+              Create your account
             </h2>
             <p className="mt-2 text-center text-sm text-gray-600">
-              Don't have an account?{' '}
+              Already have an account?{' '}
               <Link
-                to="/register"
+                to="/login"
                 className="font-medium text-orange-600 hover:text-orange-500"
               >
-                Create one
+                Sign in
               </Link>
             </p>
           </div>
@@ -71,6 +77,24 @@ const Login = () => {
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-4">
+              <div>
+                <label htmlFor="username" className="block text-sm font-bold text-gray-900">
+                  Username
+                </label>
+                <div className="mt-1">
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    placeholder="Choose a username"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label htmlFor="email" className="block text-sm font-bold text-gray-900">
                   Email address
@@ -99,12 +123,12 @@ const Login = () => {
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    placeholder="Enter your password"
+                    placeholder="Create a password"
                   />
                   <button
                     type="button"
@@ -118,6 +142,7 @@ const Login = () => {
                     )}
                   </button>
                 </div>
+                <p className="mt-1 text-xs text-gray-500">Must be at least 6 characters long</p>
               </div>
             </div>
 
@@ -133,7 +158,7 @@ const Login = () => {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                 ) : (
-                  'Sign in'
+                  'Create Account'
                 )}
               </button>
             </div>
@@ -144,4 +169,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Register; 

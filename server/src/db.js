@@ -1,67 +1,84 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');
+
+// Ensure the data directory exists
+const dataDir = path.join(__dirname, '../data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const dbPath = path.join(dataDir, 'chat.db');
+console.log('[Database] Using database at:', dbPath);
 
 // Create a new database connection
-const db = new sqlite3.Database(path.join(__dirname, '../chat.db'), (err) => {
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Database connection error:', err);
+    console.error('[Database] Connection error:', err);
   } else {
-    console.log('Connected to SQLite database');
+    console.log('[Database] Connected to SQLite database');
+    // Enable foreign keys
+    db.run('PRAGMA foreign_keys = ON');
     createTables();
   }
 });
 
 // Create necessary tables
 function createTables() {
-  // Users table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      username TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  console.log('[Database] Ensuring tables exist...');
+  db.serialize(() => {
+    // Users table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-  // Chat rooms table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS chat_rooms (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      created_by INTEGER NOT NULL,
-      is_private BOOLEAN DEFAULT FALSE,
-      access_code TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (created_by) REFERENCES users(id)
-    )
-  `);
+    // Chat rooms table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS chat_rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_by INTEGER NOT NULL,
+        is_private BOOLEAN DEFAULT FALSE,
+        access_code TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
 
-  // Chat room members table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS chat_room_members (
-      room_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (room_id, user_id),
-      FOREIGN KEY (room_id) REFERENCES chat_rooms(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
+    // Chat room members table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS chat_room_members (
+        room_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (room_id, user_id),
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
 
-  // Messages table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      content TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (room_id) REFERENCES chat_rooms(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
+    // Messages table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log('[Database] Tables created successfully');
+  });
 }
 
 // User methods
@@ -169,6 +186,39 @@ const ChatRoom = {
               }
             );
           }
+        }
+      );
+    });
+  },
+
+  update: (roomId, { name, accessCode }) => {
+    return new Promise((resolve, reject) => {
+      const updates = [];
+      const params = [];
+      
+      if (name !== undefined) {
+        updates.push('name = ?');
+        params.push(name);
+      }
+      
+      if (accessCode !== undefined) {
+        updates.push('access_code = ?');
+        params.push(accessCode);
+      }
+      
+      if (updates.length === 0) {
+        resolve();
+        return;
+      }
+      
+      params.push(roomId);
+      
+      db.run(
+        `UPDATE chat_rooms SET ${updates.join(', ')} WHERE id = ?`,
+        params,
+        function(err) {
+          if (err) reject(err);
+          else resolve();
         }
       );
     });
@@ -316,6 +366,59 @@ const ChatRoom = {
         (err, messages) => {
           if (err) reject(err);
           else resolve(messages);
+        }
+      );
+    });
+  },
+
+  getFullDetails: (roomId, userId) => {
+    return new Promise((resolve, reject) => {
+      db.get(
+        `SELECT cr.*, u.username as creator_name,
+         COUNT(crm.user_id) as member_count,
+         CASE WHEN cr.created_by = ? THEN cr.access_code ELSE NULL END as access_code
+         FROM chat_rooms cr 
+         LEFT JOIN users u ON cr.created_by = u.id 
+         LEFT JOIN chat_room_members crm ON cr.id = crm.room_id 
+         WHERE cr.id = ?
+         GROUP BY cr.id`,
+        [userId, roomId],
+        (err, room) => {
+          if (err) reject(err);
+          else resolve(room);
+        }
+      );
+    });
+  },
+
+  saveMessage: (message) => {
+    return new Promise((resolve, reject) => {
+      db.run(
+        'INSERT INTO messages (room_id, user_id, content) VALUES (?, ?, ?)',
+        [message.roomId, message.userId, message.content],
+        function(err) {
+          if (err) {
+            console.error('[Database] Error saving message:', err);
+            reject(err);
+          } else {
+            // Get the saved message with username
+            db.get(
+              `SELECT m.*, u.username 
+               FROM messages m 
+               JOIN users u ON m.user_id = u.id 
+               WHERE m.id = ?`,
+              [this.lastID],
+              (err, savedMessage) => {
+                if (err) {
+                  console.error('[Database] Error fetching saved message:', err);
+                  reject(err);
+                } else {
+                  console.log('[Database] Message saved:', savedMessage);
+                  resolve(savedMessage);
+                }
+              }
+            );
+          }
         }
       );
     });

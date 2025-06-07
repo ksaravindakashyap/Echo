@@ -3,22 +3,48 @@ const { ChatRoom } = require('./db');
 module.exports = (io) => {
   const userSockets = new Map();
   const userStatus = new Map();
+  const activityTimeouts = new Map();
 
   const updateUserStatus = (userId, status) => {
-    console.log(`Updating user ${userId} status to ${status}`);
+    console.log(`[Status Update] User ${userId} status changing to ${status}`);
+    const previousStatus = userStatus.get(userId);
     userStatus.set(userId, status);
+    // Broadcast to all clients
     io.emit('user_status_update', { userId, status });
+    console.log(`[Status Changed] User ${userId}: ${previousStatus || 'none'} -> ${status}`);
+  };
+
+  const clearUserActivityTimeout = (userId) => {
+    const timeout = activityTimeouts.get(userId);
+    if (timeout) {
+      clearTimeout(timeout);
+      activityTimeouts.delete(userId);
+    }
+  };
+
+  const setUserActivityTimeout = (userId) => {
+    clearUserActivityTimeout(userId);
+    const timeout = setTimeout(() => {
+      if (userStatus.get(userId) === 'online') {
+        console.log(`[Away Timer] Setting user ${userId} to away due to inactivity`);
+        updateUserStatus(userId, 'away');
+      }
+    }, 30000);
+    activityTimeouts.set(userId, timeout);
   };
 
   io.on('connection', (socket) => {
-    console.log('New socket connection established');
+    console.log('[Socket] New connection established');
     let userId = null;
 
     socket.on('authenticate', (data) => {
-      console.log('User authenticating:', data);
+      console.log('[Auth] User authenticating:', data);
       userId = data.userId;
       userSockets.set(userId, socket.id);
+      
+      // Set initial status to online
       updateUserStatus(userId, 'online');
+      setUserActivityTimeout(userId);
 
       // Join all user's rooms
       ChatRoom.getUserRooms(userId)
@@ -29,6 +55,17 @@ module.exports = (io) => {
           });
         })
         .catch(err => console.error('Error joining rooms:', err));
+    });
+
+    socket.on('activity', () => {
+      if (!userId) {
+        console.log('[Activity] Received activity but no userId');
+        return;
+      }
+      
+      console.log(`[Activity] Received activity from user ${userId}`);
+      updateUserStatus(userId, 'online');
+      setUserActivityTimeout(userId);
     });
 
     // Get rooms event handler
@@ -59,7 +96,7 @@ module.exports = (io) => {
     // Chat room operations
     socket.on('create_room', async (data, callback) => {
       try {
-        console.log('Creating room:', data);
+        console.log('[Socket] Creating room:', data);
         const room = await ChatRoom.create({
           name: data.name,
           createdBy: userId,
@@ -70,12 +107,18 @@ module.exports = (io) => {
         // Join the room automatically after creation
         socket.join(`room_${room.id}`);
         
-        // If private room, return the access code
+        // If private room, generate and return the access code
+        const accessCode = data.isPrivate ? Math.floor(100000 + Math.random() * 900000).toString() : null;
         const responseRoom = {
           ...room,
           participants: [userId],
-          accessCode: room.isPrivate ? room.accessCode : null
+          accessCode: accessCode
         };
+        
+        // Update the room with the access code if it's private
+        if (data.isPrivate) {
+          await ChatRoom.update(room.id, { accessCode });
+        }
         
         // Emit to all clients for public rooms, only to creator for private rooms
         if (!room.isPrivate) {
@@ -84,16 +127,22 @@ module.exports = (io) => {
           socket.emit('room_created', responseRoom);
         }
         
+        console.log('[Socket] Room created successfully:', {
+          ...responseRoom,
+          accessCode: data.isPrivate ? '******' : null
+        });
+        
         callback({ success: true, room: responseRoom });
       } catch (error) {
-        console.error('Error creating room:', error);
+        console.error('[Socket] Error creating room:', error);
         callback({ success: false, error: error.message });
       }
     });
 
     socket.on('join_room', async (data, callback) => {
       try {
-        const room = await ChatRoom.join(data.roomId, userId, data.accessCode);
+        console.log('[Socket] Joining room:', data);
+        const room = await ChatRoom.join(data.roomId, userId);
         
         // Join the socket room
         socket.join(`room_${room.id}`);
@@ -108,13 +157,15 @@ module.exports = (io) => {
         // Notify room members
         io.to(`room_${room.id}`).emit('user_joined_room', {
           roomId: room.id,
-          user: { id: userId, username: socket.username },
-          onlineUsers,
+          userId,
+          username: socket.username,
           timestamp: new Date()
         });
         
-        callback({ success: true, room: { ...room, onlineUsers } });
+        console.log('[Socket] Successfully joined room:', room.id);
+        callback({ success: true, room });
       } catch (error) {
+        console.error('[Socket] Error joining room:', error);
         callback({ success: false, error: error.message });
       }
     });
@@ -165,24 +216,80 @@ module.exports = (io) => {
 
     socket.on('get_room_messages', async (data, callback) => {
       try {
+        console.log('[Socket] Getting messages for room:', data.roomId);
         const messages = await ChatRoom.getMessages(data.roomId);
+        console.log(`[Socket] Found ${messages.length} messages`);
         callback({ success: true, messages });
       } catch (error) {
+        console.error('[Socket] Error getting messages:', error);
         callback({ success: false, error: error.message });
       }
     });
 
-    socket.on('message', async (data) => {
-      const message = {
-        roomId: data.roomId,
-        userId,
-        content: data.content,
-        timestamp: new Date()
-      };
-      io.to(`room_${data.roomId}`).emit('message', message);
+    socket.on('get_room_details', async (data, callback) => {
+      try {
+        console.log('[Socket] Getting room details:', data);
+        const room = await ChatRoom.getFullDetails(data.roomId, userId);
+        
+        if (!room) {
+          throw new Error('Room not found');
+        }
+        
+        // Only return access code if user is the creator
+        const responseRoom = {
+          ...room,
+          accessCode: room.createdBy === userId ? room.accessCode : undefined
+        };
+        
+        console.log('[Socket] Sending room details:', {
+          ...responseRoom,
+          accessCode: responseRoom.accessCode ? '******' : undefined
+        });
+        
+        callback({ success: true, room: responseRoom });
+      } catch (error) {
+        console.error('[Socket] Error getting room details:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    socket.on('message', async (data, callback) => {
+      try {
+        console.log('[Socket] New message in room:', data.roomId);
+        const message = {
+          roomId: data.roomId,
+          userId,
+          content: data.content,
+          username: data.username,
+          timestamp: new Date()
+        };
+        
+        // Save message to database
+        const savedMessage = await ChatRoom.saveMessage(message);
+        
+        // Update user's activity status when sending a message
+        updateUserStatus(userId, 'online');
+        setUserActivityTimeout(userId);
+        
+        // Broadcast message to room
+        io.to(`room_${data.roomId}`).emit('message', savedMessage);
+        
+        if (callback) {
+          callback({ success: true });
+        }
+      } catch (error) {
+        console.error('[Socket] Error sending message:', error);
+        if (callback) {
+          callback({ success: false, error: error.message });
+        }
+      }
     });
 
     socket.on('typing', (data) => {
+      // Update activity when typing
+      updateUserStatus(userId, 'online');
+      setUserActivityTimeout(userId);
+      
       socket.to(`room_${data.roomId}`).emit('typing', {
         userId,
         roomId: data.roomId,
@@ -190,24 +297,10 @@ module.exports = (io) => {
       });
     });
 
-    let activityTimeout;
-    const setAwayStatus = () => {
-      if (userId && userStatus.get(userId) === 'online') {
-        updateUserStatus(userId, 'away');
-      }
-    };
-
-    socket.on('activity', () => {
-      if (userId) {
-        clearTimeout(activityTimeout);
-        updateUserStatus(userId, 'online');
-        activityTimeout = setTimeout(setAwayStatus, 30000);
-      }
-    });
-
     socket.on('user_logout', () => {
       if (userId) {
-        // Remove user from status tracking but keep socket connection
+        console.log(`[Logout] User ${userId} logging out`);
+        clearUserActivityTimeout(userId);
         userSockets.delete(userId);
         userStatus.delete(userId);
         io.emit('user_status_update', { userId, status: 'offline' });
@@ -217,6 +310,8 @@ module.exports = (io) => {
 
     socket.on('disconnect', () => {
       if (userId) {
+        console.log(`[Disconnect] User ${userId} disconnected`);
+        clearUserActivityTimeout(userId);
         userSockets.delete(userId);
         userStatus.delete(userId);
         io.emit('user_status_update', { userId, status: 'offline' });

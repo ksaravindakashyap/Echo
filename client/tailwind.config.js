@@ -5,7 +5,22 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
       colors: {
+        white: '#FFFFFF',
+        gray: {
+          50: '#F9FAFB',
+          ...require('tailwindcss/colors').gray,
+          700: '#6B7280',
+          800: '#1F2937',
+          900: '#111827',
+        },
+        orange: {
+          500: '#F59E0B',
+          600: '#D97706',
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
