@@ -534,15 +534,16 @@ export default function ChatRoomUI() {
                 }}
                 anchorOrigin={{
                   vertical: 'top',
-                  horizontal: 'center',
+                  horizontal: 'left',
                 }}
                 transformOrigin={{
                   vertical: 'bottom',
-                  horizontal: 'center',
+                  horizontal: 'left',
                 }}
                 sx={{
                   '& .MuiPaper-root': {
                     marginTop: '-8px',
+                    marginLeft: '-200px',
                   },
                 }}
               >
