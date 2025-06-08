@@ -274,11 +274,11 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
 
   // Function to format timestamp to IST time
   const formatTime = (timestamp) => {
-    if (!timestamp) return 'No messages';
+    if (!timestamp) return '';
     
     try {
       const date = new Date(timestamp);
-      // Convert to IST (Indian Standard Time)
+      // Convert to IST (Indian Standard Time) in hh:mm:ss format
       const istTime = date.toLocaleTimeString('en-IN', {
         timeZone: 'Asia/Kolkata',
         hour12: false,
@@ -289,7 +289,7 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
       return istTime;
     } catch (error) {
       console.error('Error formatting timestamp:', error);
-      return 'Invalid time';
+      return '';
     }
   };
 

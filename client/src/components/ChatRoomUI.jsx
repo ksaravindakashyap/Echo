@@ -491,8 +491,8 @@ export default function ChatRoomUI() {
             </div>
 
             {/* Message Input */}
-            <div className="px-4 py-3 border-t bg-white">
-              <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+            <div className="px-4 py-2 border-t bg-white">
+              <form onSubmit={handleSendMessage} className="flex items-center gap-2">
                 <button
                   type="button"
                   className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
@@ -504,7 +504,7 @@ export default function ChatRoomUI() {
                   value={draft}
                   onChange={handleTyping}
                   placeholder="Type your message here..."
-                  className="flex-1 bg-gray-50 text-gray-900 rounded-full px-6 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
+                  className="flex-1 bg-gray-50 text-gray-900 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
                 />
                 <button
                   type="button"
@@ -516,7 +516,7 @@ export default function ChatRoomUI() {
                 <button
                   type="submit"
                   disabled={!draft.trim()}
-                  className="p-3 rounded-full bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="p-2 rounded-full bg-gradient-to-r from-blue-600 via-purple-600 to-orange-500 text-white hover:from-blue-700 hover:via-purple-700 hover:to-orange-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -534,11 +534,16 @@ export default function ChatRoomUI() {
                 }}
                 anchorOrigin={{
                   vertical: 'top',
-                  horizontal: 'right',
+                  horizontal: 'center',
                 }}
                 transformOrigin={{
                   vertical: 'bottom',
-                  horizontal: 'right',
+                  horizontal: 'center',
+                }}
+                sx={{
+                  '& .MuiPaper-root': {
+                    marginTop: '-8px',
+                  },
                 }}
               >
                 <div onClick={(e) => e.stopPropagation()}>
