@@ -322,11 +322,14 @@ export default function ChatRoomUI() {
     console.log('[ChatUI] Delete profile button clicked');
     console.log('[ChatUI] User data:', user);
     console.log('[ChatUI] Socket status:', socket ? 'connected' : 'not connected');
+    console.log('[ChatUI] Socket connection state:', isConnected);
+    console.log('[ChatUI] Environment - REACT_APP_SERVER_URL:', process.env.REACT_APP_SERVER_URL);
+    console.log('[ChatUI] Current socket URL:', socket?.io?.opts?.uri || 'unknown');
     
     if (window.confirm('Are you sure you want to delete your profile? This action cannot be undone.')) {
       console.log('[ChatUI] User confirmed deletion');
       
-      if (socket) {
+      if (socket && isConnected) {
         console.log('[ChatUI] Starting profile deletion process...');
         // Set flag to prevent showing socket errors during deletion
         setIsProfileBeingDeleted(true);
@@ -336,19 +339,29 @@ export default function ChatRoomUI() {
         socket.emit('delete_profile', { userId: user?.id }, (response) => {
           console.log('[ChatUI] Received response from server:', response);
           
-          if (response.success) {
+          if (response && response.success) {
             console.log('[ChatUI] Profile deletion successful, waiting for server event...');
             // The logout will be handled by the 'profile_deleted' event
           } else {
-            console.error('Failed to delete profile:', response.error);
-            alert('Failed to delete profile: ' + (response.error || 'Unknown error'));
+            console.error('Failed to delete profile:', response ? response.error : 'No response received');
+            alert('Failed to delete profile: ' + (response ? response.error : 'No response from server'));
             // Reset flag on error
             setIsProfileBeingDeleted(false);
           }
         });
+        
+        // Add timeout in case server doesn't respond
+        setTimeout(() => {
+          if (isProfileBeingDeleted) {
+            console.error('[ChatUI] Delete profile timeout - no response from server');
+            alert('Delete profile request timed out. Please check your connection and try again.');
+            setIsProfileBeingDeleted(false);
+          }
+        }, 10000); // 10 second timeout
+        
       } else {
-        console.error('Socket not available');
-        alert('Cannot delete profile - connection error');
+        console.error('[ChatUI] Socket not available or not connected. Socket:', !!socket, 'Connected:', isConnected);
+        alert('Cannot delete profile - not connected to server. Please refresh and try again.');
       }
     } else {
       console.log('[ChatUI] User cancelled deletion');

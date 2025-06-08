@@ -55,7 +55,14 @@ export const SocketProvider = ({ children }) => {
 
     console.log('[Socket] Initializing socket connection for user:', authData.user.id);
     
-    const newSocket = io(process.env.REACT_APP_SERVER_URL || 'http://localhost:5000', {
+    const serverUrl = process.env.REACT_APP_SERVER_URL || 'http://localhost:5000';
+    console.log('[Socket] Connecting to server URL:', serverUrl);
+    console.log('[Socket] Environment variables:', {
+      REACT_APP_SERVER_URL: process.env.REACT_APP_SERVER_URL,
+      NODE_ENV: process.env.NODE_ENV
+    });
+    
+    const newSocket = io(serverUrl, {
       auth: {
         token: authData.token
       },
