@@ -479,26 +479,31 @@ io.on('connection', (socket) => {
         io.to(room.id.toString()).emit('room_deleted', { roomId: room.id });
       }
       
-      // Send callback first before deletion and disconnection
+      // Send a special event to the user about profile deletion FIRST
+      socket.emit('profile_deleted', { userId: userId });
+      
+      // Send callback after the event
       if (callback) {
         callback({ success: true });
       }
       
-      // Send a special event to the user about profile deletion
-      socket.emit('profile_deleted', { userId: userId });
-      
-      // Delete user (cascade will handle rooms, messages, and memberships)
-      await User.delete(userId);
-      
-      // Remove user from connected users
-      connectedUsers.delete(socket.id);
-      
-      console.log(`Profile deleted for user ${userId}`);
-      
-      // Disconnect the user after a short delay to ensure the client receives the events
-      setTimeout(() => {
-        socket.disconnect();
-      }, 500);
+      // Wait a bit to ensure the client receives the events before proceeding
+      setTimeout(async () => {
+        try {
+          // Delete user (cascade will handle rooms, messages, and memberships)
+          await User.delete(userId);
+          
+          // Remove user from connected users
+          connectedUsers.delete(socket.id);
+          
+          console.log(`Profile deleted for user ${userId}`);
+          
+          // Disconnect the user
+          socket.disconnect();
+        } catch (deleteError) {
+          console.error('Error during delayed profile deletion:', deleteError);
+        }
+      }, 1000); // Increased delay to 1 second
       
     } catch (error) {
       console.error('Error deleting profile:', error);

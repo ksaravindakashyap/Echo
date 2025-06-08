@@ -38,6 +38,7 @@ export default function ChatRoomUI() {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showAccessCodeDialog, setShowAccessCodeDialog] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [isProfileBeingDeleted, setIsProfileBeingDeleted] = useState(false);
 
   // Helper function to normalize room data format
   const normalizeRoomData = (room) => {
@@ -168,6 +169,7 @@ export default function ChatRoomUI() {
       if (userId === user?.id) {
         // Clear all local data and redirect to landing page
         console.log('[ChatUI] Current user profile deleted, logging out and redirecting to landing page...');
+        setSocketError(null); // Ensure no socket errors are shown
         logout(true); // true flag redirects to landing page
       }
     });
@@ -179,13 +181,13 @@ export default function ChatRoomUI() {
 
   // Handle socket connection status
   useEffect(() => {
-    if (!isConnected && user) {
-      // Only show error if user is logged in
+    if (!isConnected && user && !isProfileBeingDeleted) {
+      // Only show error if user is logged in and profile is not being deleted
       setSocketError('Disconnected from server. Attempting to reconnect...');
     } else {
       setSocketError(null);
     }
-  }, [isConnected, user]);
+  }, [isConnected, user, isProfileBeingDeleted]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
@@ -309,6 +311,10 @@ export default function ChatRoomUI() {
   const handleDeleteProfile = () => {
     if (window.confirm('Are you sure you want to delete your profile? This action cannot be undone.')) {
       if (socket) {
+        // Set flag to prevent showing socket errors during deletion
+        setIsProfileBeingDeleted(true);
+        setSocketError(null); // Clear any existing socket errors
+        
         socket.emit('delete_profile', { userId: user?.id }, (response) => {
           if (response.success) {
             console.log('[ChatUI] Profile deletion successful, waiting for server event...');
@@ -316,6 +322,8 @@ export default function ChatRoomUI() {
           } else {
             console.error('Failed to delete profile:', response.error);
             alert('Failed to delete profile: ' + (response.error || 'Unknown error'));
+            // Reset flag on error
+            setIsProfileBeingDeleted(false);
           }
         });
       } else {
