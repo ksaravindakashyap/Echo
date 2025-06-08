@@ -37,8 +37,11 @@ export const SocketProvider = ({ children }) => {
       auth: {
         token: authData.token
       },
-      transports: ['websocket'], // Force websocket transport for faster connection
-      timeout: 10000,
+      transports: ['websocket', 'polling'], // Allow fallback to polling
+      timeout: 20000,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      maxReconnectionAttempts: 5,
       forceNew: true // Ensure fresh connection
     });
 
@@ -46,11 +49,13 @@ export const SocketProvider = ({ children }) => {
       console.log('[Socket] Connected successfully');
       setIsConnected(true);
       
-      // Authenticate immediately after connection
-      if (authData.user?.id) {
-        console.log('[Socket] Sending authentication for user:', authData.user.id);
-        newSocket.emit('authenticate', { userId: authData.user.id });
-      }
+      // Small delay before authenticating to ensure connection is stable
+      setTimeout(() => {
+        if (authData.user?.id) {
+          console.log('[Socket] Sending authentication for user:', authData.user.id);
+          newSocket.emit('authenticate', { userId: authData.user.id });
+        }
+      }, 100);
     });
 
     newSocket.on('disconnect', (reason) => {
@@ -67,11 +72,13 @@ export const SocketProvider = ({ children }) => {
       console.log('[Socket] Reconnected');
       setIsConnected(true);
       
-      // Re-authenticate on reconnection
-      if (authData.user?.id) {
-        console.log('[Socket] Re-authenticating user:', authData.user.id);
-        newSocket.emit('authenticate', { userId: authData.user.id });
-      }
+      // Re-authenticate on reconnection with delay
+      setTimeout(() => {
+        if (authData.user?.id) {
+          console.log('[Socket] Re-authenticating user:', authData.user.id);
+          newSocket.emit('authenticate', { userId: authData.user.id });
+        }
+      }, 100);
     });
 
     setSocket(newSocket);

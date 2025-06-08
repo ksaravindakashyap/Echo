@@ -45,7 +45,12 @@ const io = new Server(server, {
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
+  allowEIO3: true
 });
 
 // Store connected users (in-memory for session management)
