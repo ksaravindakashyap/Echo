@@ -504,7 +504,7 @@ export default function ChatRoomUI() {
                   value={draft}
                   onChange={handleTyping}
                   placeholder="Type your message here..."
-                  className="flex-1 bg-gray-50 text-gray-900 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
+                  className="flex-1 max-w-[calc(100%-200px)] bg-gray-50 text-gray-900 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
                 />
                 <button
                   type="button"
@@ -543,7 +543,7 @@ export default function ChatRoomUI() {
                 sx={{
                   '& .MuiPaper-root': {
                     marginTop: '-8px',
-                    marginLeft: '-200px',
+                    marginLeft: '-350px',
                   },
                 }}
               >
