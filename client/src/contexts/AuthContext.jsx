@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSocket } from './SocketContext';
 
 const AuthContext = createContext();
 
@@ -12,7 +11,6 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const { socket } = useSocket();
 
   useEffect(() => {
     // Check for stored auth data
@@ -23,11 +21,6 @@ export const AuthProvider = ({ children }) => {
         console.log('[Auth] Restoring auth from storage:', authData);
         if (authData.user && authData.user.id) {
           setUser(authData.user);
-          // Authenticate socket connection
-          if (socket) {
-            console.log('[Auth] Authenticating socket with user:', authData.user.id);
-            socket.emit('authenticate', { userId: authData.user.id });
-          }
         } else {
           console.log('[Auth] Invalid user data in storage');
           localStorage.removeItem('auth');
@@ -38,7 +31,7 @@ export const AuthProvider = ({ children }) => {
       }
     }
     setLoading(false);
-  }, [socket]);
+  }, []);
 
   const login = async (email, password) => {
     try {
@@ -66,11 +59,11 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('auth', JSON.stringify(data));
       setUser(data.user);
 
-      // Authenticate socket connection
-      if (socket) {
-        console.log('[Auth] Authenticating socket after login:', data.user.id);
-        socket.emit('authenticate', { userId: data.user.id });
-      }
+      // Trigger a storage event to reinitialize socket
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth',
+        newValue: JSON.stringify(data)
+      }));
 
       navigate('/chat');
       return { success: true };
@@ -100,10 +93,11 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('auth', JSON.stringify(data));
       setUser(data.user);
 
-      // Authenticate socket connection
-      if (socket) {
-        socket.emit('authenticate', { userId: data.user.id });
-      }
+      // Trigger a storage event to reinitialize socket
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth',
+        newValue: JSON.stringify(data)
+      }));
 
       navigate('/chat');
       return { success: true };
@@ -114,11 +108,15 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     console.log('[Auth] Logging out...');
-    if (socket) {
-      socket.emit('user_logout');
-    }
     localStorage.removeItem('auth');
     setUser(null);
+    
+    // Trigger a storage event to disconnect socket
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'auth',
+      newValue: null
+    }));
+    
     navigate('/login');
   };
 
