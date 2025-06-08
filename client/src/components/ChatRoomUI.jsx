@@ -164,18 +164,24 @@ export default function ChatRoomUI() {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('profile_deleted', ({ userId }) => {
+    const handleProfileDeleted = ({ userId }) => {
       console.log('[ChatUI] Profile deleted event received for user:', userId);
       if (userId === user?.id) {
         // Clear all local data and redirect to landing page
         console.log('[ChatUI] Current user profile deleted, logging out and redirecting to landing page...');
         setSocketError(null); // Ensure no socket errors are shown
-        logout(true); // true flag redirects to landing page
+        
+        // Use setTimeout to ensure logout happens after this event handler
+        setTimeout(() => {
+          logout(true); // true flag redirects to landing page
+        }, 100);
       }
-    });
+    };
+
+    socket.on('profile_deleted', handleProfileDeleted);
 
     return () => {
-      socket.off('profile_deleted');
+      socket.off('profile_deleted', handleProfileDeleted);
     };
   }, [socket, user?.id, logout]);
 

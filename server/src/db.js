@@ -122,7 +122,7 @@ function createTables() {
         content TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
       )
     `);
 
@@ -175,10 +175,35 @@ const User = {
 
   delete: (userId) => {
     return new Promise((resolve, reject) => {
-      // SQLite CASCADE will handle the cleanup automatically
-      db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
-        if (err) reject(err);
-        else resolve(true);
+      db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        
+        // First, remove user from all room memberships
+        db.run(
+          'DELETE FROM chat_room_members WHERE user_id = ?',
+          [userId],
+          (err) => {
+            if (err) {
+              console.error('[Database] Error removing user from rooms:', err);
+              db.run('ROLLBACK');
+              reject(err);
+              return;
+            }
+            
+            // Then delete the user (messages will have user_id set to NULL due to SET NULL constraint)
+            db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
+              if (err) {
+                console.error('[Database] Error deleting user:', err);
+                db.run('ROLLBACK');
+                reject(err);
+              } else {
+                db.run('COMMIT');
+                console.log(`[Database] User ${userId} deleted successfully, messages preserved with NULL user_id`);
+                resolve(true);
+              }
+            });
+          }
+        );
       });
     });
   },
@@ -410,9 +435,10 @@ const Message = {
             // Get the saved message with user info and correct format
             db.get(
               `SELECT m.id, m.room_id as roomId, m.user_id as userId, 
-               m.content, m.created_at as timestamp, u.username 
+               m.content, m.created_at as timestamp, 
+               CASE WHEN u.username IS NULL THEN '[Deleted User]' ELSE u.username END as username
                FROM messages m 
-               JOIN users u ON m.user_id = u.id 
+               LEFT JOIN users u ON m.user_id = u.id 
                WHERE m.id = ?`,
               [this.lastID],
               (err, message) => {
@@ -433,9 +459,10 @@ const Message = {
     return new Promise((resolve, reject) => {
       db.all(
         `SELECT m.id, m.room_id as roomId, m.user_id as userId, 
-         m.content, m.created_at as timestamp, u.username 
+         m.content, m.created_at as timestamp, 
+         CASE WHEN u.username IS NULL THEN '[Deleted User]' ELSE u.username END as username
          FROM messages m 
-         JOIN users u ON m.user_id = u.id 
+         LEFT JOIN users u ON m.user_id = u.id 
          WHERE m.room_id = ? 
          ORDER BY m.created_at ASC`,
         [roomId],

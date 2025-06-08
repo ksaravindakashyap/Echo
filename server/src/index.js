@@ -479,31 +479,37 @@ io.on('connection', (socket) => {
         io.to(room.id.toString()).emit('room_deleted', { roomId: room.id });
       }
       
-      // Send a special event to the user about profile deletion FIRST
-      socket.emit('profile_deleted', { userId: userId });
+      console.log(`Starting profile deletion for user ${userId}`);
       
-      // Send callback after the event
+      // Send callback first to confirm the operation started
       if (callback) {
         callback({ success: true });
       }
       
-      // Wait a bit to ensure the client receives the events before proceeding
-      setTimeout(async () => {
-        try {
-          // Delete user (cascade will handle rooms, messages, and memberships)
-          await User.delete(userId);
-          
-          // Remove user from connected users
-          connectedUsers.delete(socket.id);
-          
-          console.log(`Profile deleted for user ${userId}`);
-          
-          // Disconnect the user
+      // Send the profile deletion event
+      socket.emit('profile_deleted', { userId: userId });
+      
+      // Process deletion immediately but disconnect after delay
+      try {
+        // Delete user (this will remove from room memberships and set message user_id to NULL)
+        await User.delete(userId);
+        
+        // Remove user from connected users
+        connectedUsers.delete(socket.id);
+        
+        console.log(`Profile deleted for user ${userId}`);
+        
+        // Disconnect after a brief delay to ensure client receives the event
+        setTimeout(() => {
+          console.log(`Disconnecting user ${userId} after profile deletion`);
           socket.disconnect();
-        } catch (deleteError) {
-          console.error('Error during delayed profile deletion:', deleteError);
-        }
-      }, 1000); // Increased delay to 1 second
+        }, 500);
+        
+      } catch (deleteError) {
+        console.error('Error during profile deletion:', deleteError);
+        // Still disconnect on error
+        socket.disconnect();
+      }
       
     } catch (error) {
       console.error('Error deleting profile:', error);
