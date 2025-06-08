@@ -14,10 +14,10 @@
   to = "/index.html"
   status = 200
 
-# API proxy to backend (update with your actual backend URL)
+# API proxy to Railway backend
 [[redirects]]
   from = "/api/*"
-  to = "https://your-backend-url.railway.app/api/:splat"
+  to = "https://echo-production-4553.up.railway.app/api/:splat"
   status = 200
   force = true
 

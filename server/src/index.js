@@ -23,6 +23,15 @@ app.use(session({
   saveUninitialized: false
 }));
 
+// Health check endpoint for Railway
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // Routes
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
