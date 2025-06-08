@@ -364,25 +364,56 @@ io.on('connection', (socket) => {
       }
       
       await ChatRoom.update(data.roomId, { name: data.name.trim() });
-      const updatedRoom = await ChatRoom.getById(data.roomId);
       
-      // Format the updated room consistently
-      const formattedRoom = {
-        id: updatedRoom.id,
-        name: updatedRoom.name,
-        isPrivate: Boolean(updatedRoom.is_private),
-        createdBy: updatedRoom.created_by,
-        createdAt: updatedRoom.created_at,
-        accessCode: updatedRoom.access_code
-      };
+      console.log('Room updated in database, now broadcasting updates...');
       
-      // Notify all room participants about the name change
-      io.to(data.roomId.toString()).emit('room_updated', formattedRoom);
+      // Get all connected sockets to broadcast room updates with complete data
+      const allSockets = await io.fetchSockets();
+      console.log(`Found ${allSockets.length} connected sockets`);
       
-      console.log(`Room ${data.roomId} renamed to "${updatedRoom.name}" by user ${socket.userId}`);
+      // For each connected user, get their room list and broadcast the update
+      for (const clientSocket of allSockets) {
+        try {
+          if (clientSocket.userId) {
+            console.log(`Processing update for user ${clientSocket.userId}`);
+            const userRooms = await ChatRoom.getByUserId(clientSocket.userId);
+            const roomForUser = userRooms.find(r => r.id === data.roomId);
+            
+            if (roomForUser) {
+              console.log(`User ${clientSocket.userId} has access to room, sending update`);
+              // This user has access to this room, send them the complete update
+              const formattedRoom = {
+                id: roomForUser.id,
+                name: roomForUser.name,
+                isPrivate: roomForUser.isPrivate,
+                createdBy: roomForUser.createdBy,
+                createdAt: roomForUser.createdAt,
+                lastMessage: roomForUser.lastMessage,
+                lastMessageTime: roomForUser.lastMessageTime,
+                accessCode: roomForUser.createdBy === clientSocket.userId ? roomForUser.accessCode : undefined
+              };
+              
+              console.log(`Sending room_updated event to user ${clientSocket.userId}:`, formattedRoom);
+              clientSocket.emit('room_updated', formattedRoom);
+            } else {
+              console.log(`User ${clientSocket.userId} does not have access to room ${data.roomId}`);
+            }
+          } else {
+            console.log('Socket has no userId:', clientSocket.id);
+          }
+        } catch (error) {
+          console.error('Error sending room update to user:', clientSocket.userId, error);
+        }
+      }
+      
+      console.log(`Room ${data.roomId} renamed to "${data.name.trim()}" by user ${socket.userId}`);
       
       if (callback) {
-        callback({ success: true, room: formattedRoom });
+        // Get the updated room data for the callback
+        const userRooms = await ChatRoom.getByUserId(socket.userId);
+        const updatedRoomForCallback = userRooms.find(r => r.id === data.roomId);
+        
+        callback({ success: true, room: updatedRoomForCallback });
       }
     } catch (error) {
       console.error('Error renaming room:', error);

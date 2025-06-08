@@ -97,16 +97,19 @@ const RoomList = ({ onRoomSelect, selectedRoom, currentUser, currentUserStatus }
       console.log('[RoomList] Current rooms before update:', rooms.map(r => ({ id: r.id, name: r.name, lastMessage: r.lastMessage })));
       
       setRooms(prev => {
+        console.log('[RoomList] Previous rooms state:', prev);
         const updatedRooms = prev.map(r => {
           if (r.id === room.id) {
-            console.log('[RoomList] Updating room:', r.id, 'with new data:', room);
+            console.log('[RoomList] Updating room:', r.id, 'from:', r.name, 'to:', room.name);
             // Merge the room data to ensure all fields are preserved
-            return {
+            const updatedRoom = {
               ...r,
               ...room,
               lastMessage: room.lastMessage,
               lastMessageTime: room.lastMessageTime
             };
+            console.log('[RoomList] Updated room object:', updatedRoom);
+            return updatedRoom;
           }
           return r;
         });
