@@ -166,6 +166,9 @@ export default function ChatRoomUI() {
 
     const handleProfileDeleted = ({ userId }) => {
       console.log('[ChatUI] Profile deleted event received for user:', userId);
+      console.log('[ChatUI] Current user ID:', user?.id);
+      console.log('[ChatUI] User IDs match:', userId === user?.id);
+      
       if (userId === user?.id) {
         // Clear all local data and redirect to landing page
         console.log('[ChatUI] Current user profile deleted, logging out and redirecting to landing page...');
@@ -173,6 +176,7 @@ export default function ChatRoomUI() {
         
         // Use setTimeout to ensure logout happens after this event handler
         setTimeout(() => {
+          console.log('[ChatUI] Calling logout function...');
           logout(true); // true flag redirects to landing page
         }, 100);
       }
@@ -315,13 +319,23 @@ export default function ChatRoomUI() {
   };
 
   const handleDeleteProfile = () => {
+    console.log('[ChatUI] Delete profile button clicked');
+    console.log('[ChatUI] User data:', user);
+    console.log('[ChatUI] Socket status:', socket ? 'connected' : 'not connected');
+    
     if (window.confirm('Are you sure you want to delete your profile? This action cannot be undone.')) {
+      console.log('[ChatUI] User confirmed deletion');
+      
       if (socket) {
+        console.log('[ChatUI] Starting profile deletion process...');
         // Set flag to prevent showing socket errors during deletion
         setIsProfileBeingDeleted(true);
         setSocketError(null); // Clear any existing socket errors
         
+        console.log('[ChatUI] Emitting delete_profile event with userId:', user?.id);
         socket.emit('delete_profile', { userId: user?.id }, (response) => {
+          console.log('[ChatUI] Received response from server:', response);
+          
           if (response.success) {
             console.log('[ChatUI] Profile deletion successful, waiting for server event...');
             // The logout will be handled by the 'profile_deleted' event
@@ -336,6 +350,8 @@ export default function ChatRoomUI() {
         console.error('Socket not available');
         alert('Cannot delete profile - connection error');
       }
+    } else {
+      console.log('[ChatUI] User cancelled deletion');
     }
     setUserMenuAnchorEl(null);
   };
