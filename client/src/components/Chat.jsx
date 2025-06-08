@@ -141,7 +141,7 @@ const Chat = () => {
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <Typography variant="h6">JustChat</Typography>
+          <Typography variant="h6">Echo</Typography>
           <UserMenu />
         </Box>
         <ChatRoomList onRoomSelect={handleRoomSelect} />
@@ -270,7 +270,7 @@ const Chat = () => {
             }}
           >
             <Typography variant="h4" color="text.secondary">
-              Welcome to JustChat
+              Welcome to Echo
             </Typography>
             <Typography variant="body1" color="text.secondary">
               Select a chat room from the sidebar or create a new one to start messaging

@@ -28,4 +28,13 @@ yarn-error.log*
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Documentation (exclude from version control)
+/docs/
+/documents/
+*.pdf
+*DOCUMENTATION*.md
+*DOCUMENTATION*.html
+VIDEO_DEMONSTRATION_SCRIPT.md
+NETLIFY_DEPLOYMENT_GUIDE.md 

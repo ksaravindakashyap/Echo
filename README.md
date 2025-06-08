@@ -1,81 +1,71 @@
-# Just-Chat
+# Echo
 
-A real-time chat application built with React, Express.js, and WebSocket.
+A real-time chat application built with React and Socket.io, featuring secure authentication and room-based messaging.
 
-## Features
-
-- Real-time messaging using WebSocket
-- Modern and responsive UI
-- User authentication
-- Multiple chat rooms support
-- Message history
-
-## Tech Stack
-
-- Frontend:
-  - React
-  - Chakra UI (for styling)
-  - Socket.io-client (for WebSocket)
-  
-- Backend:
-  - Node.js
-  - Express.js
-  - Socket.io
-  - MongoDB (for message persistence)
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
-
 - Node.js (v14 or higher)
-- npm or yarn
-- MongoDB (local or Atlas)
+- npm
 
 ### Installation
+```bash
+# Install dependencies
+npm install
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/Just-Chat.git
-   cd Just-Chat
-   ```
+# Install client dependencies
+cd client && npm install
 
-2. Install dependencies:
-   ```bash
-   # Install backend dependencies
-   cd server
-   npm install
+# Install server dependencies  
+cd ../server && npm install
+```
 
-   # Install frontend dependencies
-   cd ../client
-   npm install
-   ```
+### Running the Application
+```bash
+# Start the server (from server directory)
+cd server && npm start
 
-3. Create `.env` files:
-   
-   In the server directory:
-   ```
-   PORT=5000
-   MONGODB_URI=your_mongodb_uri
-   ```
+# Start the client (from client directory)
+cd ../client && npm start
+```
 
-   In the client directory:
-   ```
-   REACT_APP_SERVER_URL=http://localhost:5000
-   ```
+## Features
+- 🔐 Secure authentication with JWT tokens
+- 💬 Real-time messaging with Socket.io
+- 🏠 Public and private chat rooms
+- 🔒 Room-based permissions
+- 👥 User management
+- 📱 Responsive design
 
-4. Start the application:
-   ```bash
-   # Start backend server
-   cd server
-   npm run dev
+## Security
+- bcrypt password hashing with salt rounds
+- JWT token authentication
+- Socket.io authentication middleware
+- Room-based authorization
 
-   # In a new terminal, start frontend
-   cd client
-   npm start
-   ```
+## Environment Variables
+Create `.env` files in both client and server directories:
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser.
+**Server (.env):**
+```
+JWT_SECRET=your-jwt-secret-key
+SESSION_SECRET=your-session-secret-key
+CLIENT_URL=http://localhost:3000
+```
+
+**Client (.env):**
+```
+REACT_APP_SERVER_URL=http://localhost:5000
+```
+
+## Documentation
+Comprehensive documentation is available in the `/documents` folder (excluded from version control).
+
+## Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+MIT License 
