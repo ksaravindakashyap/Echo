@@ -159,14 +159,33 @@ export default function ChatRoomUI() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  // Handle profile deletion event
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('profile_deleted', ({ userId }) => {
+      console.log('[ChatUI] Profile deleted event received for user:', userId);
+      if (userId === user?.id) {
+        // Clear all local data and redirect to landing page
+        console.log('[ChatUI] Current user profile deleted, logging out and redirecting to landing page...');
+        logout(true); // true flag redirects to landing page
+      }
+    });
+
+    return () => {
+      socket.off('profile_deleted');
+    };
+  }, [socket, user?.id, logout]);
+
   // Handle socket connection status
   useEffect(() => {
-    if (!isConnected) {
+    if (!isConnected && user) {
+      // Only show error if user is logged in
       setSocketError('Disconnected from server. Attempting to reconnect...');
     } else {
       setSocketError(null);
     }
-  }, [isConnected]);
+  }, [isConnected, user]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
@@ -292,7 +311,8 @@ export default function ChatRoomUI() {
       if (socket) {
         socket.emit('delete_profile', { userId: user?.id }, (response) => {
           if (response.success) {
-            logout(); // Log out the user after successful deletion
+            console.log('[ChatUI] Profile deletion successful, waiting for server event...');
+            // The logout will be handled by the 'profile_deleted' event
           } else {
             console.error('Failed to delete profile:', response.error);
             alert('Failed to delete profile: ' + (response.error || 'Unknown error'));

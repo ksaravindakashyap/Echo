@@ -83,6 +83,11 @@ export const SocketProvider = ({ children }) => {
     newSocket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
       setIsConnected(false);
+      
+      // Don't show error for intentional disconnections (logout, profile deletion)
+      if (reason === 'io server disconnect' || reason === 'client namespace disconnect') {
+        console.log('[Socket] Intentional disconnection, not showing error');
+      }
     });
 
     newSocket.on('connect_error', (error) => {

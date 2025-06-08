@@ -106,8 +106,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    console.log('[Auth] Logging out...');
+  const logout = (redirectToLanding = false) => {
+    console.log('[Auth] Logging out...', redirectToLanding ? '(redirecting to landing)' : '(redirecting to login)');
     localStorage.removeItem('auth');
     setUser(null);
     
@@ -117,7 +117,8 @@ export const AuthProvider = ({ children }) => {
       newValue: null
     }));
     
-    navigate('/login');
+    // Redirect to landing page if profile was deleted, otherwise to login
+    navigate(redirectToLanding ? '/' : '/login');
   };
 
   const value = {
